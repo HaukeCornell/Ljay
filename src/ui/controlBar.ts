@@ -1,7 +1,10 @@
 interface MountOpts {
   host: HTMLElement;
   vibes: { id: string; name: string }[];
+  lyricModes: { id: string; name: string }[];
   onVibeChange(id: string): void;
+  onLyricModeChange(id: string): void;
+  onVideoModeChange(id: string): void;
   onLyricsToggle(visible: boolean): void;
   onHoldToggle(hold: boolean): void;
 }
@@ -10,6 +13,8 @@ interface ControlBarHandle {
   setNowPlaying(s: string): void;
   setStatus(s: string): void;
   setVibe(id: string): void;
+  setLyricMode(id: string): void;
+  setVideoMode(id: string): void;
   setLyricsVisible(v: boolean): void;
   setHold(v: boolean): void;
   setHidden(v: boolean): void;
@@ -20,6 +25,8 @@ const AUTO_HIDE_MS = 3000;
 export function mountControlBar(opts: MountOpts): ControlBarHandle {
   const bar = opts.host;
   const picker = bar.querySelector<HTMLSelectElement>("#vibe-picker")!;
+  const lyricPicker = bar.querySelector<HTMLSelectElement>("#lyric-mode-picker")!;
+  const videoPicker = bar.querySelector<HTMLSelectElement>("#video-mode")!;
   const toggleBtn = bar.querySelector<HTMLButtonElement>("#toggle-lyrics")!;
   const holdBtn = bar.querySelector<HTMLButtonElement>("#toggle-hold")!;
   const nowEl = bar.querySelector<HTMLSpanElement>("#now-playing")!;
@@ -32,6 +39,14 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
     opt.value = v.id;
     opt.textContent = v.name;
     picker.appendChild(opt);
+  }
+  // Populate lyric-mode picker.
+  lyricPicker.replaceChildren();
+  for (const m of opts.lyricModes) {
+    const opt = document.createElement("option");
+    opt.value = m.id;
+    opt.textContent = m.name;
+    lyricPicker.appendChild(opt);
   }
 
   let lyricsVisible = true;
@@ -56,6 +71,16 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
 
   picker.addEventListener("change", () => {
     opts.onVibeChange(picker.value);
+    showBar();
+  });
+
+  lyricPicker.addEventListener("change", () => {
+    opts.onLyricModeChange(lyricPicker.value);
+    showBar();
+  });
+
+  videoPicker.addEventListener("change", () => {
+    opts.onVideoModeChange(videoPicker.value);
     showBar();
   });
 
@@ -133,6 +158,8 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
     setNowPlaying(s) { nowEl.textContent = s; },
     setStatus(s) { statusEl.textContent = s; },
     setVibe(id) { if (picker.value !== id) picker.value = id; },
+    setLyricMode(id) { if (lyricPicker.value !== id) lyricPicker.value = id; },
+    setVideoMode(id) { if (videoPicker.value !== id) videoPicker.value = id; },
     setLyricsVisible(v) {
       lyricsVisible = v;
       updateToggleLabel();

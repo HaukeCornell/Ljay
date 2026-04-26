@@ -212,7 +212,14 @@ function inferWordTimings(line: LyricLine): { text: string; startMs: number; end
   return out;
 }
 
-export function create(): Vibe {
+export interface FlythroughOptions {
+  /** If false, skips the 3D word system entirely and doesn't hide the
+   * standard #lyrics overlay. Used by the MV vibe as a stars+grid backdrop. */
+  lyrics?: boolean;
+}
+
+export function create(opts: FlythroughOptions = {}): Vibe {
+  const showLyrics = opts.lyrics !== false;
   let host: VibeHost | null = null;
   let renderer: THREE.WebGLRenderer | null = null;
   let scene: THREE.Scene | null = null;
@@ -462,18 +469,22 @@ export function create(): Vibe {
       gridMesh.position.set(0, -2.2, -40);
       scene.add(gridMesh);
 
-      // Hide standard lyric overlay — we own lyrics here.
-      const std = document.getElementById("lyrics");
-      if (std) {
-        originalLyricsDisplay = std.style.display;
-        std.style.display = "none";
+      // Hide standard lyric overlay only if we own our own 3D lyric layer.
+      if (showLyrics) {
+        const std = document.getElementById("lyrics");
+        if (std) {
+          originalLyricsDisplay = std.style.display;
+          std.style.display = "none";
+        }
       }
 
-      // State subscription.
+      // State subscription. We always need positionMs (used elsewhere too),
+      // but only rebuild word meshes if we render lyrics.
       unsubState = subscribe((s) => {
         positionMs = s.playhead
           ? s.playhead.positionMs + (performance.now() - s.playhead.anchorMs) * (s.playhead.rate || 1)
           : 0;
+        if (!showLyrics) return;
         const key = s.lyrics ? `${s.lyrics.trackKey}:${s.lyrics.lines.length}` : "none";
         if (key !== lyricLinesKey) {
           lyricLinesKey = key;

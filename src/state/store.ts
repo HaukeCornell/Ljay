@@ -10,6 +10,8 @@ const initial: AppState = {
   currentVibe: "winamp",
   lyricsVisible: true,
   lyricsHold: false,
+  lyricAnimationOverride: null,
+  autoVibe: false,
 };
 
 let state: AppState = initial;

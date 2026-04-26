@@ -128,13 +128,15 @@ export interface LyricStyle {
   /** Optional text-shadow / glow CSS. */
   shadow?: string;
   /** Animation flavor for line transitions. */
-  animation: "scroll" | "typewriter" | "fade" | "bounce" | "snippet";
+  animation: LyricAnimation;
   uppercase?: boolean;
   /** For "snippet" mode: max visible words on each side of the current word. */
   snippetWindow?: number;
 }
 
 // ---------- App state ----------
+
+export type LyricAnimation = "scroll" | "typewriter" | "fade" | "bounce" | "snippet" | "spatial";
 
 export interface AppState {
   source: "offline" | "connecting" | "connected";
@@ -145,4 +147,8 @@ export interface AppState {
   lyricsVisible: boolean;
   /** Hold-mode: already-sung words stay visible on screen instead of fading out. */
   lyricsHold: boolean;
+  /** When set, overrides the active vibe's lyricStyle.animation; null = use vibe default. */
+  lyricAnimationOverride: LyricAnimation | null;
+  /** Auto-VJ: cycles vibe on every track change. */
+  autoVibe: boolean;
 }

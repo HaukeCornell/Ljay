@@ -1,5 +1,6 @@
 import type { AudioFrame, LyricStyle, NowPlaying, Vibe, VibeHost } from "../types.ts";
 import { subscribe } from "../state/store";
+import { create as createFallback } from "./flythrough";
 
 // "Music Video" vibe.
 // - Subscribes to the global app state so it always knows what's playing.
@@ -45,6 +46,10 @@ export function create(): Vibe {
   let unsubState: (() => void) | null = null;
   let pollTimer: number | null = null;
   let unsubKeys: (() => void) | null = null;
+  // Background visualizer that renders into the canvas when the video isn't
+  // yet playing (downloading, missing, error, buffering). Lets the room never
+  // stare at a black box.
+  let fallback: Vibe | null = null;
 
   let currentTrackKey: string | null = null;
   let currentMv: MvState = { state: "idle" };
@@ -130,10 +135,14 @@ export function create(): Vibe {
     name: "Music video",
     lyricStyle,
 
-    mount(h: VibeHost) {
+    async mount(h: VibeHost) {
       host = h;
-      // Hide the WebGL canvas — we render the video on top of the container.
-      h.canvas.style.display = "none";
+      // We DON'T hide the canvas. The fallback vibe renders into it; the video
+      // sits on top with its own opacity that we cross-fade based on readiness.
+
+      // Mount the fallback visualizer first so it owns the canvas's GL context.
+      fallback = createFallback();
+      await fallback.mount(h);
 
       video = document.createElement("video");
       video.className = "ljay-mv-video";
@@ -166,24 +175,28 @@ export function create(): Vibe {
         width: "100%",
         height: "100%",
         objectFit: "cover",
-        background: "#000",
+        background: "transparent",
         zIndex: "1",
         pointerEvents: "none",
+        opacity: "0",
+        transition: "opacity 360ms ease-out",
       } as CSSStyleDeclaration);
       h.container.appendChild(video);
 
+      // Tiny status pill bottom-left so the user knows what's happening with
+      // the video fetch — the fallback vibe is fully visible behind it.
       overlay = document.createElement("div");
       Object.assign(overlay.style, {
         position: "absolute",
-        inset: "0",
+        left: "12px",
+        bottom: "12px",
         display: "none",
-        alignItems: "center",
-        justifyContent: "center",
-        textAlign: "center",
-        padding: "0 6vw",
-        color: "rgba(255,255,255,0.85)",
-        font: '500 18px/1.4 -apple-system, system-ui, sans-serif',
-        background: "rgba(0,0,0,0.65)",
+        padding: "6px 10px",
+        color: "rgba(255,255,255,0.78)",
+        font: '500 12px/1.2 -apple-system, system-ui, sans-serif',
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(6px)",
+        borderRadius: "6px",
         zIndex: "2",
         pointerEvents: "none",
       } as CSSStyleDeclaration);
@@ -226,15 +239,26 @@ export function create(): Vibe {
       unsubKeys = () => window.removeEventListener("keydown", onKey);
     },
 
-    update(_audio: AudioFrame | null, _dtMs: number) {
-      if (!video || currentMv.state !== "ready" || !playhead) return;
+    update(audio: AudioFrame | null, dtMs: number) {
+      // Always tick the fallback vibe so it keeps animating in the background.
+      try { fallback?.update(audio, dtMs); } catch (e) { console.error("mv fallback render", e); }
+
+      if (!video) return;
+
+      // Decide whether the video should be showing. Cross-faded via CSS opacity.
+      const ready = currentMv.state === "ready"
+        && video.readyState >= 3 /* HAVE_FUTURE_DATA */
+        && !video.paused;
+      const wantOpacity = ready ? "1" : "0";
+      if (video.style.opacity !== wantOpacity) video.style.opacity = wantOpacity;
+
+      if (currentMv.state !== "ready" || !playhead) return;
 
       // Pitch follow.
       const targetRate = Math.max(0.0625, Math.min(16, playhead.rate || 1));
       if (Math.abs(video.playbackRate - targetRate) > 0.005) {
         video.playbackRate = targetRate;
       }
-      // Pause if DJ paused.
       if (playhead.rate === 0) {
         if (!video.paused) video.pause();
         return;
@@ -243,8 +267,6 @@ export function create(): Vibe {
         void video.play().catch(() => {});
       }
 
-      // Position follow with hysteresis: only hard-seek on big drift, else
-      // let the video play forward naturally.
       const wantSec = Math.max(0, (playhead.positionMs + (performance.now() - playhead.anchorMs) * playhead.rate + activeOffset) / 1000);
       if (!isFinite(wantSec) || video.duration && wantSec > video.duration) return;
       const have = video.currentTime;
@@ -268,7 +290,8 @@ export function create(): Vibe {
       }
       overlay?.remove();
       overlay = null;
-      if (host) host.canvas.style.display = "block";
+      try { fallback?.unmount(); } catch {}
+      fallback = null;
       host = null;
       currentTrackKey = null;
       currentMv = { state: "idle" };
