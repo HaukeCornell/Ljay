@@ -7,3 +7,4 @@ sidecar/nowplaying_helper
 .env.local
 .vite/
 mv-cache/*
+mv-cache/

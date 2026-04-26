@@ -202,6 +202,50 @@ export class LyricScene {
       case "snippet":
         this.animateSnippet(line, next);
         break;
+      case "subtitle":
+        this.animateSubtitle(line);
+        break;
+      case "karaoke":
+        this.animateKaraoke(line);
+        break;
+    }
+  }
+
+  /** Broadcast TV-style subtitle: single line, anchored bottom, dark scrim. */
+  private animateSubtitle(line: LyricLine): void {
+    this.currentEl.textContent = line.text;
+    this.nextEl.textContent = "";
+    this.currentEl.classList.remove("ljay-enter");
+    void this.currentEl.offsetWidth;
+    this.currentEl.classList.add("ljay-enter");
+  }
+
+  /** Classic karaoke: whole line rendered with per-word fill that sweeps L→R. */
+  private animateKaraoke(line: LyricLine): void {
+    this.renderKaraokeWords(this.currentEl, line);
+    this.nextEl.textContent = "";
+  }
+
+  private renderKaraokeWords(host: HTMLDivElement, line: LyricLine): void {
+    host.replaceChildren();
+    const words = inferWordTimings(line);
+    for (const w of words) {
+      const span = document.createElement("span");
+      span.className = "ljay-word ljay-karaoke-word";
+      span.dataset.start = String(w.startMs);
+      span.dataset.end = String(w.endMs);
+      // Layered: a dim base layer + a bright fill layer that animates a
+      // left-to-right wipe via clip-path as the word's sing-window plays.
+      const base = document.createElement("span");
+      base.className = "ljay-karaoke-base";
+      base.textContent = w.text;
+      const fill = document.createElement("span");
+      fill.className = "ljay-karaoke-fill";
+      fill.textContent = w.text;
+      fill.style.clipPath = "inset(0 100% 0 0)";
+      span.appendChild(base);
+      span.appendChild(fill);
+      host.appendChild(span);
     }
   }
 
@@ -227,14 +271,16 @@ export class LyricScene {
   }
 
   private hardCut(line: LyricLine, next: LyricLine | null, animation: Animation): void {
-    if (animation === "typewriter") {
+    if (animation === "typewriter" || animation === "subtitle") {
       this.currentEl.textContent = line.text;
     } else if (animation === "snippet") {
       this.renderSnippetWords(this.currentEl, line);
+    } else if (animation === "karaoke") {
+      this.renderKaraokeWords(this.currentEl, line);
     } else {
       this.renderWords(this.currentEl, line);
     }
-    this.nextEl.textContent = animation === "fade" ? "" : (next?.text ?? "");
+    this.nextEl.textContent = animation === "fade" || animation === "subtitle" || animation === "karaoke" ? "" : (next?.text ?? "");
     // Reset animation classes.
     this.currentEl.classList.remove("ljay-enter", "ljay-exit", "ljay-bounce");
     this.nextEl.classList.remove("ljay-enter", "ljay-exit", "ljay-bounce");
@@ -309,6 +355,10 @@ export class LyricScene {
       this.applySnippetHighlight(positionMs);
       return;
     }
+    if (this.style.animation === "karaoke") {
+      this.applyKaraokeFill(positionMs);
+      return;
+    }
 
     const words = this.currentEl.querySelectorAll<HTMLSpanElement>(".ljay-word");
     if (words.length === 0) return;
@@ -329,6 +379,23 @@ export class LyricScene {
           span.style.opacity = "0.55";
         }
       }
+    }
+  }
+
+  private applyKaraokeFill(positionMs: number): void {
+    const wordEls = this.currentEl.querySelectorAll<HTMLSpanElement>(".ljay-karaoke-word");
+    if (wordEls.length === 0) return;
+    for (const we of wordEls) {
+      const start = Number(we.dataset.start);
+      const end = Number(we.dataset.end);
+      const fill = we.querySelector<HTMLSpanElement>(".ljay-karaoke-fill");
+      if (!fill) continue;
+      let pct: number;
+      if (positionMs <= start) pct = 0;
+      else if (positionMs >= end) pct = 100;
+      else pct = ((positionMs - start) / Math.max(40, end - start)) * 100;
+      // clip-path: inset(top right bottom left) — we shrink the right side over time.
+      fill.style.clipPath = `inset(0 ${100 - pct}% 0 0)`;
     }
   }
 
@@ -471,6 +538,56 @@ const LYRIC_CSS = `
 #lyrics .ljay-snippet-word { display: inline-block; opacity: 0; transition: opacity 140ms ease-out, transform 140ms ease-out; transform-origin: 50% 60%; will-change: opacity, transform; margin: 0 0.18em; }
 #lyrics[data-animation="snippet"] .ljay-line-current { font-size: clamp(36px, 7vw, 110px); letter-spacing: 0.01em; line-height: 1.1; }
 #lyrics[data-animation="snippet"] .ljay-line-next { display: none; }
+
+/* Subtitle: bottom-anchored single line with dark scrim, broadcast TV style. */
+#lyrics[data-animation="subtitle"] { justify-content: flex-end; padding-bottom: 6vh; }
+#lyrics[data-animation="subtitle"] .ljay-line-current {
+  font-size: clamp(28px, 4.2vw, 64px);
+  font-weight: 800;
+  letter-spacing: 0;
+  line-height: 1.15;
+  padding: 0.35em 0.7em;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  border-radius: 8px;
+  box-shadow: 0 6px 32px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.04) inset;
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  text-shadow: 0 2px 6px rgba(0,0,0,0.85);
+  max-width: 84vw;
+  white-space: normal;
+  text-align: center;
+}
+#lyrics[data-animation="subtitle"] .ljay-line-next { display: none; }
+@keyframes ljay-subtitle-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+#lyrics[data-animation="subtitle"] .ljay-line-current.ljay-enter { animation: ljay-subtitle-in 220ms ease-out both; }
+
+/* Karaoke: whole-line text with a left-to-right colour wipe per word. */
+#lyrics[data-animation="karaoke"] .ljay-line-current {
+  font-size: clamp(40px, 6.5vw, 96px);
+  font-weight: 900;
+  letter-spacing: 0.005em;
+  line-height: 1.1;
+  text-align: center;
+  text-shadow: 0 4px 18px rgba(0,0,0,0.85), 0 0 1px rgba(0,0,0,0.6);
+}
+#lyrics[data-animation="karaoke"] .ljay-line-next { display: none; }
+#lyrics .ljay-karaoke-word {
+  display: inline-block;
+  position: relative;
+  margin: 0 0.18em;
+}
+#lyrics .ljay-karaoke-base {
+  color: rgba(255,255,255,0.42);
+}
+#lyrics .ljay-karaoke-fill {
+  position: absolute;
+  inset: 0;
+  color: #ffe082;
+  filter: drop-shadow(0 0 6px rgba(255, 200, 90, 0.7));
+  /* clip-path is set inline per frame for the wipe. */
+  pointer-events: none;
+}
 #lyrics[data-animation="scroll"] .ljay-line-current.ljay-enter { animation: ljay-scroll-in 200ms ease-out both; }
 #lyrics[data-animation="fade"] .ljay-line-current.ljay-fade-in { animation: ljay-fade 250ms ease-out both; }
 #lyrics[data-animation="fade"] .ljay-line-next { display: none; }

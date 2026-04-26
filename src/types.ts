@@ -136,7 +136,7 @@ export interface LyricStyle {
 
 // ---------- App state ----------
 
-export type LyricAnimation = "scroll" | "typewriter" | "fade" | "bounce" | "snippet" | "spatial";
+export type LyricAnimation = "scroll" | "typewriter" | "fade" | "bounce" | "snippet" | "spatial" | "subtitle" | "karaoke";
 
 export interface AppState {
   source: "offline" | "connecting" | "connected";

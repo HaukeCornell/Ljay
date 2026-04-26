@@ -26,6 +26,8 @@ const LYRIC_MODE_META: { id: string; name: string }[] = [
   { id: "auto",       name: "Auto (vibe default)" },
   { id: "spatial",    name: "Spatial 3D (fly-through)" },
   { id: "snippet",    name: "Snippet (word-windowed)" },
+  { id: "karaoke",    name: "Karaoke (line wipe)" },
+  { id: "subtitle",   name: "Subtitle (broadcast band)" },
   { id: "scroll",     name: "Scroll (line scroll)" },
   { id: "fade",       name: "Fade" },
   { id: "typewriter", name: "Typewriter" },
@@ -33,7 +35,7 @@ const LYRIC_MODE_META: { id: string; name: string }[] = [
 ];
 
 const LYRIC_ANIMATIONS: ReadonlySet<LyricAnimation> = new Set([
-  "scroll", "typewriter", "fade", "bounce", "snippet", "spatial",
+  "scroll", "typewriter", "fade", "bounce", "snippet", "spatial", "subtitle", "karaoke",
 ]);
 
 function loadStoredVibe(): string {
