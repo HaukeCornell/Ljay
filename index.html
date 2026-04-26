@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ljay</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; padding: 0; height: 100%; background: #000; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; overflow: hidden; }
+      #root { position: fixed; inset: 0; }
+      #stage { position: absolute; inset: 0; }
+      #stage canvas { width: 100% !important; height: 100% !important; display: block; }
+      #lyrics { position: absolute; inset: 0; pointer-events: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.6em; padding: 0 6vw; text-align: center; }
+      #control-bar { position: absolute; top: 0; left: 0; right: 0; height: 44px; display: flex; align-items: center; gap: 12px; padding: 0 12px; background: rgba(0,0,0,0.55); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); z-index: 10; font-size: 13px; }
+      #control-bar.hidden { opacity: 0; pointer-events: none; transition: opacity 0.4s; }
+      #control-bar select, #control-bar button { background: rgba(255,255,255,0.08); color: #fff; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 10px; font-size: 13px; cursor: pointer; }
+      #control-bar button:hover, #control-bar select:hover { background: rgba(255,255,255,0.16); }
+      #status { margin-left: auto; opacity: 0.7; font-variant-numeric: tabular-nums; font-size: 12px; }
+      #now-playing { opacity: 0.85; }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div id="stage"></div>
+      <div id="lyrics"></div>
+      <div id="control-bar">
+        <strong>Ljay</strong>
+        <label>Vibe <select id="vibe-picker"></select></label>
+        <button id="toggle-lyrics">Lyrics: on</button>
+        <span id="now-playing">—</span>
+        <span id="status">offline</span>
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

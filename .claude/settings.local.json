@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(swiftc -O sidecar/nowplaying_helper.swift -o sidecar/nowplaying_helper)",
+      "Bash(timeout 8 npm run dev)",
+      "Bash(npx vite *)",
+      "Bash(npm run *)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot",
+      "Bash(npx tsc *)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_network_requests",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"node sidecar/index.mjs\")",
+      "Bash(pkill -f \"vite\")",
+      "Bash(lsof -ti:5173)",
+      "Bash(lsof -ti:7777)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
+      "Bash(swift /tmp/np_probe2.swift)",
+      "Bash(pkill -f \"concurrently\")",
+      "Bash(pkill -f \"/usr/bin/swift\")"
+    ]
+  }
+}
