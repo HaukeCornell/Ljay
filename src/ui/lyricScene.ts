@@ -1,4 +1,5 @@
 import type { LyricLine, LyricStyle } from "../types";
+import { Lyric3DRenderer } from "./lyric3d";
 
 const SCRUB_THRESHOLD_MS = 1500;
 
@@ -19,6 +20,9 @@ export class LyricScene {
   private style: LyricStyle = DEFAULT_STYLE;
   private visible = true;
   private hold = false;
+  private spatial: Lyric3DRenderer | null = null;
+  private lastPositionForSpatial = 0;
+  private lastSpatialTickT = 0;
   private currentIndex = -1;
   private prevIndex = -1;
   private lastPositionMs = 0;
@@ -48,11 +52,29 @@ export class LyricScene {
   setStyle(style: LyricStyle): void {
     this.style = { ...DEFAULT_STYLE, ...style };
     this.applyStyle();
+    this.syncSpatialMode();
+  }
+
+  /** Mount or unmount the 3D spatial renderer based on the active animation. */
+  private syncSpatialMode(): void {
+    const want = this.style.animation === "spatial";
+    if (want && !this.spatial) {
+      // Hide the DOM lyric nodes — the 3D layer will render lyrics instead.
+      this.currentEl.style.display = "none";
+      this.nextEl.style.display = "none";
+      this.spatial = new Lyric3DRenderer(this.host);
+    } else if (!want && this.spatial) {
+      this.spatial.unmount();
+      this.spatial = null;
+      this.currentEl.style.display = "";
+      this.nextEl.style.display = "";
+    }
   }
 
   setVisible(v: boolean): void {
     this.visible = v;
     this.host.style.display = v ? "" : "none";
+    this.spatial?.setVisible(v);
   }
 
   setHold(v: boolean): void {
@@ -61,6 +83,17 @@ export class LyricScene {
 
   update(positionMs: number, lines: LyricLine[] | null): void {
     if (!this.visible || this.disposed) return;
+
+    // Spatial 3D mode owns its own renderer — feed it position + dt.
+    if (this.spatial) {
+      const now = performance.now();
+      const dtMs = this.lastSpatialTickT === 0 ? 16 : Math.max(1, Math.min(64, now - this.lastSpatialTickT));
+      this.lastSpatialTickT = now;
+      this.spatial.setLines(lines);
+      this.spatial.update(positionMs, dtMs);
+      this.lastPositionForSpatial = positionMs;
+      return;
+    }
 
     const dt = positionMs - this.lastPositionMs;
     const scrubbed = Math.abs(dt) > SCRUB_THRESHOLD_MS;
@@ -97,6 +130,8 @@ export class LyricScene {
       window.clearInterval(this.typewriterTimer);
       this.typewriterTimer = null;
     }
+    this.spatial?.unmount();
+    this.spatial = null;
     this.host.replaceChildren();
   }
 

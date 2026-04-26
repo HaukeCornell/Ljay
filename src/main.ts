@@ -24,6 +24,7 @@ const VIDEO_MODES: ReadonlySet<VideoMode> = new Set([
 
 const LYRIC_MODE_META: { id: string; name: string }[] = [
   { id: "auto",       name: "Auto (vibe default)" },
+  { id: "spatial",    name: "Spatial 3D (fly-through)" },
   { id: "snippet",    name: "Snippet (word-windowed)" },
   { id: "scroll",     name: "Scroll (line scroll)" },
   { id: "fade",       name: "Fade" },
@@ -32,7 +33,7 @@ const LYRIC_MODE_META: { id: string; name: string }[] = [
 ];
 
 const LYRIC_ANIMATIONS: ReadonlySet<LyricAnimation> = new Set([
-  "scroll", "typewriter", "fade", "bounce", "snippet",
+  "scroll", "typewriter", "fade", "bounce", "snippet", "spatial",
 ]);
 
 function loadStoredVibe(): string {
