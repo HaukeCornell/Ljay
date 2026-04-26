@@ -36,6 +36,7 @@ export class Stage {
     const self = this;
     this.vibeHost = {
       canvas: this.canvas,
+      container: this.host,
       get width() {
         return self.width;
       },
@@ -85,9 +86,12 @@ export class Stage {
       this.canvas.style.width = "100%";
       this.canvas.style.height = "100%";
       this.host.appendChild(this.canvas);
-      // Rebuild vibeHost.canvas pointer.
+      // Rebuild vibeHost.canvas pointer; container stays the same.
       (this.vibeHost as { canvas: HTMLCanvasElement }).canvas = this.canvas;
     }
+    // Make sure the canvas is visible at the start of each mount; DOM-only
+    // vibes can hide it themselves.
+    this.canvas.style.display = "block";
     await vibe.mount(this.vibeHost);
     this.vibe = vibe;
   }

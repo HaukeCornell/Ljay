@@ -111,6 +111,9 @@ export interface Vibe {
 
 export interface VibeHost {
   canvas: HTMLCanvasElement;
+  /** The DOM element the canvas lives inside. DOM-based vibes (e.g. video)
+   *  attach their own elements here and may hide the canvas. */
+  container: HTMLElement;
   width: number;
   height: number;
   /** Resize hook, host calls this when layout changes. */
@@ -125,8 +128,10 @@ export interface LyricStyle {
   /** Optional text-shadow / glow CSS. */
   shadow?: string;
   /** Animation flavor for line transitions. */
-  animation: "scroll" | "typewriter" | "fade" | "bounce";
+  animation: "scroll" | "typewriter" | "fade" | "bounce" | "snippet";
   uppercase?: boolean;
+  /** For "snippet" mode: max visible words on each side of the current word. */
+  snippetWindow?: number;
 }
 
 // ---------- App state ----------
@@ -138,4 +143,6 @@ export interface AppState {
   lyrics: Lyrics | null;
   currentVibe: string;
   lyricsVisible: boolean;
+  /** Hold-mode: already-sung words stay visible on screen instead of fading out. */
+  lyricsHold: boolean;
 }

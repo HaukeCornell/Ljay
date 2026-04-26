@@ -21,7 +21,9 @@
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages",
       "Bash(swift /tmp/np_probe2.swift)",
       "Bash(pkill -f \"concurrently\")",
-      "Bash(pkill -f \"/usr/bin/swift\")"
+      "Bash(pkill -f \"/usr/bin/swift\")",
+      "Bash(yt-dlp --version)",
+      "Bash(pkill -f \"node /Users/haukesandhaus/Documents/GitHub/Ljay/node_modules/.bin/vite\")"
     ]
   }
 }

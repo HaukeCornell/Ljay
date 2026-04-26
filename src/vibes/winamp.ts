@@ -36,7 +36,8 @@ export function create(): Vibe {
     color: "#ffffff",
     shadow:
       "0 0 8px rgba(255,0,255,0.85), 0 0 18px rgba(0,255,255,0.7), 0 2px 0 rgba(0,0,0,0.6)",
-    animation: "scroll",
+    animation: "snippet",
+    snippetWindow: 2,
   };
 
   return {

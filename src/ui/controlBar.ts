@@ -3,6 +3,7 @@ interface MountOpts {
   vibes: { id: string; name: string }[];
   onVibeChange(id: string): void;
   onLyricsToggle(visible: boolean): void;
+  onHoldToggle(hold: boolean): void;
 }
 
 interface ControlBarHandle {
@@ -10,6 +11,7 @@ interface ControlBarHandle {
   setStatus(s: string): void;
   setVibe(id: string): void;
   setLyricsVisible(v: boolean): void;
+  setHold(v: boolean): void;
   setHidden(v: boolean): void;
 }
 
@@ -19,6 +21,7 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
   const bar = opts.host;
   const picker = bar.querySelector<HTMLSelectElement>("#vibe-picker")!;
   const toggleBtn = bar.querySelector<HTMLButtonElement>("#toggle-lyrics")!;
+  const holdBtn = bar.querySelector<HTMLButtonElement>("#toggle-hold")!;
   const nowEl = bar.querySelector<HTMLSpanElement>("#now-playing")!;
   const statusEl = bar.querySelector<HTMLSpanElement>("#status")!;
 
@@ -32,6 +35,7 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
   }
 
   let lyricsVisible = true;
+  let lyricsHold = false;
   let hidden = false;
   let hideTimer: number | null = null;
 
@@ -62,8 +66,19 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
     showBar();
   });
 
+  holdBtn.addEventListener("click", () => {
+    lyricsHold = !lyricsHold;
+    updateHoldLabel();
+    opts.onHoldToggle(lyricsHold);
+    showBar();
+  });
+
   const updateToggleLabel = () => {
     toggleBtn.textContent = `Lyrics: ${lyricsVisible ? "on" : "off"}`;
+  };
+  const updateHoldLabel = () => {
+    holdBtn.textContent = `Hold: ${lyricsHold ? "on" : "off"}`;
+    holdBtn.style.background = lyricsHold ? "rgba(120,200,255,0.22)" : "";
   };
 
   // Mouse activity → reveal.
@@ -102,11 +117,17 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
         hidden = true;
         if (hideTimer !== null) window.clearTimeout(hideTimer);
       }
+    } else if (k === "k") {
+      lyricsHold = !lyricsHold;
+      updateHoldLabel();
+      opts.onHoldToggle(lyricsHold);
+      showBar();
     }
   });
 
   scheduleHide();
   updateToggleLabel();
+  updateHoldLabel();
 
   return {
     setNowPlaying(s) { nowEl.textContent = s; },
@@ -115,6 +136,10 @@ export function mountControlBar(opts: MountOpts): ControlBarHandle {
     setLyricsVisible(v) {
       lyricsVisible = v;
       updateToggleLabel();
+    },
+    setHold(v) {
+      lyricsHold = v;
+      updateHoldLabel();
     },
     setHidden(v) {
       hidden = v;

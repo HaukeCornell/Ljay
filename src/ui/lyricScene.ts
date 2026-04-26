@@ -18,6 +18,7 @@ export class LyricScene {
   private styleEl: HTMLStyleElement;
   private style: LyricStyle = DEFAULT_STYLE;
   private visible = true;
+  private hold = false;
   private currentIndex = -1;
   private prevIndex = -1;
   private lastPositionMs = 0;
@@ -52,6 +53,10 @@ export class LyricScene {
   setVisible(v: boolean): void {
     this.visible = v;
     this.host.style.display = v ? "" : "none";
+  }
+
+  setHold(v: boolean): void {
+    this.hold = v;
   }
 
   update(positionMs: number, lines: LyricLine[] | null): void {
@@ -159,12 +164,38 @@ export class LyricScene {
       case "bounce":
         this.animateBounce(line, next);
         break;
+      case "snippet":
+        this.animateSnippet(line, next);
+        break;
+    }
+  }
+
+  private animateSnippet(line: LyricLine, next: LyricLine | null): void {
+    // Word-windowed karaoke: render every word of the line as a span with a
+    // per-word startMs (real if present, else interpolated). The host frame
+    // loop calls applyWordHighlight() each tick to advance the visible window.
+    this.renderSnippetWords(this.currentEl, line);
+    this.nextEl.textContent = next?.text ?? "";
+  }
+
+  private renderSnippetWords(host: HTMLDivElement, line: LyricLine): void {
+    host.replaceChildren();
+    const words = inferWordTimings(line);
+    for (const w of words) {
+      const span = document.createElement("span");
+      span.className = "ljay-word ljay-snippet-word";
+      span.dataset.start = String(w.startMs);
+      span.dataset.end = String(w.endMs);
+      span.textContent = w.text;
+      host.appendChild(span);
     }
   }
 
   private hardCut(line: LyricLine, next: LyricLine | null, animation: Animation): void {
     if (animation === "typewriter") {
       this.currentEl.textContent = line.text;
+    } else if (animation === "snippet") {
+      this.renderSnippetWords(this.currentEl, line);
     } else {
       this.renderWords(this.currentEl, line);
     }
@@ -239,6 +270,11 @@ export class LyricScene {
   }
 
   private applyWordHighlight(line: LyricLine, positionMs: number): void {
+    if (this.style.animation === "snippet") {
+      this.applySnippetHighlight(positionMs);
+      return;
+    }
+
     const words = this.currentEl.querySelectorAll<HTMLSpanElement>(".ljay-word");
     if (words.length === 0) return;
 
@@ -258,6 +294,61 @@ export class LyricScene {
           span.style.opacity = "0.55";
         }
       }
+    }
+  }
+
+  private applySnippetHighlight(positionMs: number): void {
+    const spans = this.currentEl.querySelectorAll<HTMLSpanElement>(".ljay-snippet-word");
+    if (spans.length === 0) return;
+
+    const window = Math.max(1, this.style.snippetWindow ?? 2);
+    const hold = this.hold;
+
+    let currentIdx = -1;
+    for (let i = 0; i < spans.length; i++) {
+      const start = Number(spans[i].dataset.start);
+      if (start <= positionMs) currentIdx = i;
+      else break;
+    }
+
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      const start = Number(span.dataset.start);
+      const end = Number(span.dataset.end);
+      const dist = i - currentIdx;
+      let opacity = 0;
+      let scale = 1;
+
+      if (currentIdx < 0) {
+        // Before line begins: show only the first `window` words faintly.
+        opacity = i < window ? 0.25 : 0;
+      } else if (i === currentIdx) {
+        // Current word: bright + tiny pop.
+        const dur = Math.max(60, end - start);
+        const t = Math.max(0, Math.min(1, (positionMs - start) / dur));
+        opacity = 0.85 + 0.15 * t;
+        scale = 1.04;
+      } else if (dist > 0 && dist <= window) {
+        // Upcoming words: dimmer the further out.
+        opacity = 0.45 - 0.12 * (dist - 1);
+        opacity = Math.max(0.18, opacity);
+      } else if (dist < 0) {
+        // Already-sung words. In hold mode they all stay visible at a sticky
+        // brightness so the singer can see what just passed; otherwise only
+        // the in-window trailing words fade out.
+        if (hold) {
+          opacity = 0.85;
+        } else if (-dist <= window) {
+          opacity = Math.max(0.15, 0.55 - 0.18 * (-dist - 1));
+        } else {
+          opacity = 0;
+        }
+      } else {
+        opacity = 0;
+      }
+
+      span.style.opacity = String(opacity);
+      span.style.transform = scale === 1 ? "" : `scale(${scale})`;
     }
   }
 
@@ -297,11 +388,54 @@ function lineKey(line: LyricLine): string {
   return `${line.startMs}|${line.text}`;
 }
 
+interface InferredWord {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
+/** Build per-word timings. Uses real word timing when present; otherwise
+ * interpolates linearly across the line's duration. */
+function inferWordTimings(line: LyricLine): InferredWord[] {
+  const tokens = line.text.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return [];
+
+  const lineEnd = line.endMs ?? line.startMs + Math.max(1500, tokens.length * 220);
+  const lineDur = Math.max(200, lineEnd - line.startMs);
+
+  // If real word timings exist and match the token count, use them.
+  if (line.words && line.words.length === tokens.length) {
+    const out: InferredWord[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const startMs = line.words[i].startMs;
+      const endMs = i + 1 < line.words.length ? line.words[i + 1].startMs : lineEnd;
+      out.push({ text: tokens[i], startMs, endMs });
+    }
+    return out;
+  }
+
+  // Otherwise interpolate. Weight words by character length so longer words
+  // stay on screen a bit longer than short ones.
+  const totalChars = tokens.reduce((s, t) => s + Math.max(1, t.length), 0);
+  let cursor = line.startMs;
+  const out: InferredWord[] = [];
+  for (const t of tokens) {
+    const share = Math.max(1, t.length) / totalChars;
+    const slice = lineDur * share;
+    out.push({ text: t, startMs: cursor, endMs: cursor + slice });
+    cursor += slice;
+  }
+  return out;
+}
+
 const LYRIC_CSS = `
 #lyrics .ljay-line { font-size: clamp(28px, 5.5vw, 84px); line-height: 1.15; max-width: 90vw; }
 #lyrics .ljay-line-current { opacity: 1; }
 #lyrics .ljay-line-next { font-size: clamp(18px, 3vw, 40px); opacity: 0.45; }
 #lyrics .ljay-word { display: inline-block; opacity: 0.55; transition: opacity 80ms linear; }
+#lyrics .ljay-snippet-word { display: inline-block; opacity: 0; transition: opacity 140ms ease-out, transform 140ms ease-out; transform-origin: 50% 60%; will-change: opacity, transform; margin: 0 0.18em; }
+#lyrics[data-animation="snippet"] .ljay-line-current { font-size: clamp(36px, 7vw, 110px); letter-spacing: 0.01em; line-height: 1.1; }
+#lyrics[data-animation="snippet"] .ljay-line-next { display: none; }
 #lyrics[data-animation="scroll"] .ljay-line-current.ljay-enter { animation: ljay-scroll-in 200ms ease-out both; }
 #lyrics[data-animation="fade"] .ljay-line-current.ljay-fade-in { animation: ljay-fade 250ms ease-out both; }
 #lyrics[data-animation="fade"] .ljay-line-next { display: none; }

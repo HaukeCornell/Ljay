@@ -13,10 +13,12 @@
 // Logs go to stderr only (stdout is reserved in case anyone pipes us).
 
 import { spawn } from "node:child_process";
+import { createServer } from "node:http";
 import { performance } from "node:perf_hooks";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { handleHttp as handleMv } from "./mv.mjs";
 
 // ---------------------------------------------------------------------------
 // Config
@@ -81,13 +83,42 @@ function clamp(x, lo, hi) {
 }
 
 // ---------------------------------------------------------------------------
-// WebSocket server
+// HTTP + WebSocket server (one port, two protocols)
 // ---------------------------------------------------------------------------
 
-const wss = new WebSocketServer({ host: WS_HOST, port: WS_PORT });
+const httpServer = createServer(async (req, res) => {
+  // Off-load /mv* to the music-video module.
+  if (req.url && (req.url.startsWith("/mv?") || req.url === "/mv" || req.url.startsWith("/mv-file/"))) {
+    try {
+      const handled = await handleMv(req, res);
+      if (handled) return;
+    } catch (e) {
+      log("mv handler threw:", e.message);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ state: "error", error: e.message }));
+      }
+      return;
+    }
+  }
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end("not found");
+});
 
-wss.on("listening", () => {
-  log(`ws listening on ws://${WS_HOST}:${WS_PORT}`);
+const wss = new WebSocketServer({ noServer: true });
+
+httpServer.on("upgrade", (req, socket, head) => {
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss.emit("connection", ws, req);
+  });
+});
+
+httpServer.listen(WS_PORT, WS_HOST, () => {
+  log(`http+ws listening on http://${WS_HOST}:${WS_PORT} (ws://${WS_HOST}:${WS_PORT})`);
+});
+
+httpServer.on("error", (err) => {
+  log("http server error:", err.message);
 });
 
 wss.on("error", (err) => {
@@ -278,7 +309,8 @@ function shutdown(signal) {
     }, 250);
   }
   try {
-    wss.close(() => process.exit(0));
+    wss.close();
+    httpServer.close(() => process.exit(0));
   } catch {
     process.exit(0);
   }

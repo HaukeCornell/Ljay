@@ -89,6 +89,10 @@ async function boot() {
       setState({ lyricsVisible: visible });
       lyricScene.setVisible(visible);
     },
+    onHoldToggle: (hold) => {
+      setState({ lyricsHold: hold });
+      lyricScene.setHold(hold);
+    },
   });
 
   // ---- state → UI projections ----

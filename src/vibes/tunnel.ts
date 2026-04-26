@@ -102,7 +102,8 @@ export function create(): Vibe {
     weight: 800,
     color: "#ffffff",
     shadow: "0 4px 24px rgba(0,0,0,0.9), 0 0 12px rgba(0,0,0,0.7)",
-    animation: "fade",
+    animation: "snippet",
+    snippetWindow: 2,
     uppercase: true,
   };
 

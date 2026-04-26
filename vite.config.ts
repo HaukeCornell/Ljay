@@ -18,6 +18,9 @@ export default defineConfig({
           });
         },
       },
+      // Music-video acquisition + serving lives on the sidecar.
+      "/mv": { target: "http://127.0.0.1:7777", changeOrigin: false },
+      "/mv-file": { target: "http://127.0.0.1:7777", changeOrigin: false },
     },
   },
   build: {

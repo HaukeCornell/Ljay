@@ -9,6 +9,7 @@ const initial: AppState = {
   lyrics: null,
   currentVibe: "winamp",
   lyricsVisible: true,
+  lyricsHold: false,
 };
 
 let state: AppState = initial;

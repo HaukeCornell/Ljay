@@ -104,7 +104,8 @@ export function create(): Vibe {
     font: '"Helvetica Neue", "Arial", sans-serif',
     weight: 900,
     color: "#ffffff",
-    animation: "typewriter",
+    animation: "snippet",
+    snippetWindow: 1,
     uppercase: true,
   };
 
