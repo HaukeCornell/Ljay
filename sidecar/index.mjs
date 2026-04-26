@@ -14,7 +14,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -56,6 +56,46 @@ let lastNowPlayingEvent = null;
 let lastPlayheadEvent = null;
 /** Last "link" event we sent (for new-client burst). */
 let lastLinkEvent = null;
+
+// ---------------------------------------------------------------------------
+// Control state — shared "remote-control" plane between the renderer and any
+// number of control panels. Last-write-wins. Path-keyed (e.g.,
+// "currentVibe", "lyricAnimation", "video.mode", "effectParams.halftone.color").
+// Persists to disk so panels rejoin a session intact.
+// ---------------------------------------------------------------------------
+
+const CONTROL_STATE_PATH = join(__dirname, "control-state.json");
+let controlState = {};
+try {
+  if (existsSync(CONTROL_STATE_PATH)) {
+    const txt = readFileSync(CONTROL_STATE_PATH, "utf8");
+    const parsed = JSON.parse(txt);
+    if (parsed && typeof parsed === "object") controlState = parsed;
+  }
+} catch (e) { log("control-state load failed:", e.message); }
+
+let controlSaveTimer = null;
+function persistControlState() {
+  if (controlSaveTimer) clearTimeout(controlSaveTimer);
+  controlSaveTimer = setTimeout(() => {
+    try { writeFileSync(CONTROL_STATE_PATH, JSON.stringify(controlState, null, 2)); }
+    catch (e) { log("control-state save failed:", e.message); }
+  }, 350);
+}
+
+/** Set a path-keyed value into controlState. Does not broadcast — caller does. */
+function setControlPath(path, value) {
+  if (!path || typeof path !== "string") return;
+  // Path can be "a.b.c" — split and walk/create.
+  const parts = path.split(".");
+  let cur = controlState;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const k = parts[i];
+    if (typeof cur[k] !== "object" || cur[k] === null) cur[k] = {};
+    cur = cur[k];
+  }
+  cur[parts[parts.length - 1]] = value;
+}
 /** True if our most recent terminal state was "stopped"; suppresses repeats. */
 let stoppedLatched = false;
 /** Last contentItemId we sent artwork for; only re-send artwork on change. */
@@ -140,8 +180,40 @@ wss.on("connection", (sock, req) => {
     if (lastNowPlayingEvent) sock.send(JSON.stringify(lastNowPlayingEvent));
     if (lastPlayheadEvent)   sock.send(JSON.stringify(lastPlayheadEvent));
     if (lastLinkEvent)       sock.send(JSON.stringify(lastLinkEvent));
+    // Replay the entire control state as a single snapshot so a panel
+    // joining mid-session sees what's already configured.
+    sock.send(JSON.stringify({ kind: "control-snapshot", state: controlState, seq: nextSeq() }));
   } catch { /* ignore */ }
   sock.on("error", () => { /* ignore */ });
+  sock.on("message", (data) => {
+    let msg;
+    try { msg = JSON.parse(data.toString()); }
+    catch { return; }
+    if (!msg || typeof msg !== "object") return;
+    if (msg.kind === "control-set" && typeof msg.path === "string") {
+      setControlPath(msg.path, msg.value);
+      persistControlState();
+      const out = JSON.stringify({ kind: "control-update", path: msg.path, value: msg.value, seq: nextSeq() });
+      for (const client of wss.clients) {
+        if (client.readyState === 1 && client !== sock) {
+          try { client.send(out); } catch { /* ignore */ }
+        }
+      }
+      // Echo back to sender so they can confirm the round-trip if they want.
+      try { sock.send(out); } catch { /* ignore */ }
+    } else if (msg.kind === "control-batch" && Array.isArray(msg.entries)) {
+      for (const e of msg.entries) {
+        if (e && typeof e.path === "string") setControlPath(e.path, e.value);
+      }
+      persistControlState();
+      const out = JSON.stringify({ kind: "control-snapshot", state: controlState, seq: nextSeq() });
+      for (const client of wss.clients) {
+        if (client.readyState === 1) {
+          try { client.send(out); } catch { /* ignore */ }
+        }
+      }
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------

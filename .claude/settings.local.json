@@ -27,7 +27,17 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:ableton.github.io)",
-      "Bash(curl -sI http://localhost:5173/fonts/helvetiker_bold.typeface.json)"
+      "Bash(curl -sI http://localhost:5173/fonts/helvetiker_bold.typeface.json)",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(mkdir -p /tmp/ljay-design)",
+      "Bash(cp /Users/haukesandhaus/.claude/projects/-Users-haukesandhaus-Documents-GitHub-Ljay/18e3826a-de0c-47d2-804f-7b0e3e6006f8/tool-results/webfetch-1777229669368-c7jple.bin ./design.bin)",
+      "Bash(gunzip -t ./design.bin)",
+      "Bash(gunzip -c ./design.bin)",
+      "Bash(tar -xf extracted)",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__resize_page",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page"
     ]
   }
 }

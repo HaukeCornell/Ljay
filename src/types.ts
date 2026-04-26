@@ -51,10 +51,15 @@ export interface LinkState {
 /** Composite event emitted by every TrackSource. Renderer is free to ignore
  * fields it does not yet consume. */
 export interface TrackSourceEvent {
-  kind: "now-playing" | "playhead" | "stopped" | "link";
+  kind: "now-playing" | "playhead" | "stopped" | "link" | "control-snapshot" | "control-update";
   track?: NowPlaying;
   playhead?: Playhead;
   link?: LinkState;
+  /** For "control-snapshot" — full nested object of the shared control plane. */
+  state?: Record<string, unknown>;
+  /** For "control-update" — single path/value mutation. */
+  path?: string;
+  value?: unknown;
   /** Monotonic counter so the consumer can detect dropped events. */
   seq: number;
 }

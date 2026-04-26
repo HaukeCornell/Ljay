@@ -1,0 +1,13 @@
+{
+  "currentVibe": "minimal",
+  "lyricAnimation": "scroll",
+  "effectParams": {
+    "halftone": {
+      "opacity": 0.895
+    },
+    "minimal": {
+      "opacity": 0.96
+    }
+  },
+  "videoMode": "on"
+}

@@ -9,6 +9,18 @@ type Listener = (e: TrackSourceEvent) => void;
 
 interface SidecarMsg extends TrackSourceEvent {}
 
+/** Default sidecar WebSocket. We auto-detect: when the page is served from
+ * the same host as the sidecar (Vite proxy at /ws) we use a relative URL so
+ * the iPad-side panel and the local renderer both work without surgery. */
+function defaultWsUrl(): string {
+  if (typeof window !== "undefined") {
+    // If served by Vite (same origin as the sidecar via /ws proxy), use it.
+    // Otherwise fall back to localhost on the sidecar's hard-coded port.
+    const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    return `${proto}//${window.location.host}/ws`;
+  }
+  return "ws://127.0.0.1:7777";
+}
 const DEFAULT_URL = "ws://127.0.0.1:7777";
 const RECONNECT_BACKOFF_MS = [250, 500, 1000, 2000, 4000, 4000];
 
@@ -21,7 +33,18 @@ export class MediaRemoteSource implements TrackSource {
     (s: "offline" | "connecting" | "connected") => void
   >();
 
-  constructor(private url: string = DEFAULT_URL) {}
+  constructor(private url: string = defaultWsUrl()) {
+    void DEFAULT_URL;
+  }
+
+  /** Send a `control-set` message to the sidecar so it broadcasts to all
+   *  panels (and our own renderer applies the update via the same WS echo). */
+  sendControlSet(path: string, value: unknown): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try { this.ws.send(JSON.stringify({ kind: "control-set", path, value })); }
+      catch { /* ignore */ }
+    }
+  }
 
   async start(): Promise<void> {
     this.stopped = false;

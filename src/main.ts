@@ -161,6 +161,41 @@ async function boot() {
     setState({ source: s });
     bar.setStatus(s);
   });
+  /** Apply a single control-plane mutation from the panel side. Recognised
+   *  paths drive specific local state. Unknown paths are silently ignored
+   *  (panel persists them anyway, so they survive reload). */
+  function applyControlPath(path: string, value: unknown): void {
+    if (path === "currentVibe" && typeof value === "string") {
+      void setVibeSelection(value);
+    } else if (path === "lyricAnimation" && typeof value === "string") {
+      setLyricMode(value);
+      bar.setLyricMode(value);
+    } else if (path === "lyricsVisible" && typeof value === "boolean") {
+      setState({ lyricsVisible: value });
+      lyricScene.setVisible(value);
+      bar.setLyricsVisible(value);
+    } else if (path === "lyricsHold" && typeof value === "boolean") {
+      setState({ lyricsHold: value });
+      lyricScene.setHold(value);
+      bar.setHold(value);
+    } else if (path === "videoMode" && typeof value === "string") {
+      setVideoMode(value);
+      bar.setVideoMode(value);
+    }
+    // effectParams.<id>.* and lyricParams.<id>.* are persisted in the sidecar
+    // for now but don't yet drive renderer state — the layer architecture
+    // migration will unlock per-vibe param uniforms.
+  }
+
+  function applyControlSnapshot(state: Record<string, unknown>): void {
+    if (state == null || typeof state !== "object") return;
+    if (typeof state.currentVibe === "string") applyControlPath("currentVibe", state.currentVibe);
+    if (typeof state.lyricAnimation === "string") applyControlPath("lyricAnimation", state.lyricAnimation);
+    if (typeof state.lyricsVisible === "boolean") applyControlPath("lyricsVisible", state.lyricsVisible);
+    if (typeof state.lyricsHold === "boolean") applyControlPath("lyricsHold", state.lyricsHold);
+    if (typeof state.videoMode === "string") applyControlPath("videoMode", state.videoMode);
+  }
+
   source.on((evt) => {
     if (evt.kind === "now-playing" && evt.track) {
       setState({ nowPlaying: evt.track });
@@ -180,8 +215,18 @@ async function boot() {
       setState({ nowPlaying: null, playhead: null });
       lyricsStore.clear();
       videoLayer.setTrack(null);
+    } else if (evt.kind === "control-snapshot" && evt.state) {
+      applyControlSnapshot(evt.state);
+    } else if (evt.kind === "control-update" && evt.path !== undefined) {
+      applyControlPath(evt.path, evt.value);
     }
   });
+
+  // Mirror local control-bar changes into the WS so any panel sees them too.
+  // Handlers below also call sendControlSet alongside their normal local apply.
+  function pushControl(path: string, value: unknown): void {
+    source.sendControlSet(path, value);
+  }
 
   lyricsStore.on((lyrics) => setState({ lyrics }));
 
@@ -196,16 +241,27 @@ async function boot() {
     host: controlHost,
     vibes: listVibes(),
     lyricModes: LYRIC_MODE_META,
-    onVibeChange: (id) => void setVibeSelection(id),
-    onLyricModeChange: setLyricMode,
-    onVideoModeChange: setVideoMode,
+    onVibeChange: (id) => {
+      void setVibeSelection(id);
+      pushControl("currentVibe", id);
+    },
+    onLyricModeChange: (id) => {
+      setLyricMode(id);
+      pushControl("lyricAnimation", id);
+    },
+    onVideoModeChange: (id) => {
+      setVideoMode(id);
+      pushControl("videoMode", id);
+    },
     onLyricsToggle: (visible) => {
       setState({ lyricsVisible: visible });
       lyricScene.setVisible(visible);
+      pushControl("lyricsVisible", visible);
     },
     onHoldToggle: (hold) => {
       setState({ lyricsHold: hold });
       lyricScene.setHold(hold);
+      pushControl("lyricsHold", hold);
     },
   });
 
