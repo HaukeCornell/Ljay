@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { AudioFrame, LyricStyle, Vibe, VibeHost } from "../types.ts";
+import type { AudioFrame, LyricStyle, Vibe, VibeHost, VibeParams } from "../types.ts";
 
 interface TunnelUniforms {
   uTime: { value: number };
@@ -9,7 +9,15 @@ interface TunnelUniforms {
   uBeat: { value: number };
   uLevel: { value: number };
   uRes: { value: THREE.Vector2 };
+  uColor:  { value: THREE.Color };
+  uAccent: { value: THREE.Color };
+  uReact:  { value: number };
   [k: string]: THREE.IUniform;
+}
+
+function parseHex(hex: string | undefined, fallback: number): THREE.Color {
+  if (typeof hex !== "string") return new THREE.Color(fallback);
+  try { return new THREE.Color(hex); } catch { return new THREE.Color(fallback); }
 }
 
 const VERT = /* glsl */ `
@@ -30,14 +38,18 @@ uniform float uTreble;
 uniform float uBeat;
 uniform float uLevel;
 uniform vec2  uRes;
+uniform vec3  uColor;
+uniform vec3  uAccent;
+uniform float uReact;
 
-// magenta/cyan-leaning IQ cosine palette
+// Two-stop palette interpolated from the user's primary + accent. Beat phase
+// drives a soft saturated highlight tinted slightly toward white.
 vec3 palette(float t) {
-  vec3 a = vec3(0.55, 0.40, 0.60);
-  vec3 b = vec3(0.45, 0.55, 0.50);
-  vec3 c = vec3(1.00, 1.00, 1.00);
-  vec3 d = vec3(0.00, 0.20, 0.55); // shifts toward magenta + cyan
-  return a + b * cos(6.2832 * (c * t + d));
+  float w = 0.5 + 0.5 * cos(6.2832 * t);
+  vec3 base = mix(uAccent, uColor, w);
+  // Tiny rainbow lift so a fully-grey palette doesn't feel dead.
+  vec3 lift = 0.06 * cos(6.2832 * (t + vec3(0.0, 0.33, 0.67)));
+  return base + lift;
 }
 
 void main() {
@@ -49,22 +61,22 @@ void main() {
   float r = length(p);
   float a = atan(p.y, p.x);
 
-  float u = 0.5 / max(r, 1e-3) + uTime * 0.5 * (1.0 + uBass * 2.0);
-  float v = a / 3.14159 + uTime * 0.05 * (1.0 + uMid);
+  float u = 0.5 / max(r, 1e-3) + uTime * 0.5 * (1.0 + uBass * 2.0 * uReact);
+  float v = a / 3.14159 + uTime * 0.05 * (1.0 + uMid * uReact);
 
   // checker-ish ribs
-  float rib = 0.5 + 0.5 * sin(u * 6.2832 + uTreble * 4.0);
+  float rib = 0.5 + 0.5 * sin(u * 6.2832 + uTreble * 4.0 * uReact);
   float band = 0.5 + 0.5 * sin(v * 6.2832 * 4.0);
 
-  vec3 col = palette(fract(u * 0.5 + uMid * 0.2));
+  vec3 col = palette(fract(u * 0.5 + uMid * 0.2 * uReact));
   col *= mix(0.6, 1.0, rib);
   col += 0.08 * band;
 
-  // beat pulse
-  col = mix(col, col * 1.5, clamp(uBeat, 0.0, 1.0));
+  // beat pulse — multiplier scaled by reactivity
+  col = mix(col, col * 1.5, clamp(uBeat * uReact, 0.0, 1.0));
 
-  // level glow toward center
-  col += vec3(0.4, 0.1, 0.6) * uLevel * smoothstep(0.6, 0.0, r);
+  // level glow toward center, tinted by the active accent
+  col += uAccent * 0.6 * uLevel * uReact * smoothstep(0.6, 0.0, r);
 
   // vignette / fade so the singularity isn't a white nuke
   col *= smoothstep(0.0, 0.4, r);
@@ -95,6 +107,9 @@ export function create(): Vibe {
     uBeat: { value: 0 },
     uLevel: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
+    uColor:  { value: new THREE.Color(0xff5ea8) }, // panel: "color"  (magenta)
+    uAccent: { value: new THREE.Color(0x5b8cff) }, // panel: "accent" (cyan)
+    uReact:  { value: 1.0 },
   };
 
   const lyricStyle: LyricStyle = {
@@ -159,6 +174,14 @@ export function create(): Vibe {
         uniforms.uLevel.value *= 0.9;
       }
       renderer.render(scene, camera);
+    },
+
+    setParams(p: VibeParams) {
+      if (p.color)  uniforms.uColor.value = parseHex(p.color, 0xff5ea8);
+      if (p.accent) uniforms.uAccent.value = parseHex(p.accent, 0x5b8cff);
+      if (typeof p.reactivity === "number") {
+        uniforms.uReact.value = Math.max(0, Math.min(3, p.reactivity));
+      }
     },
 
     unmount() {

@@ -201,6 +201,15 @@ wss.on("connection", (sock, req) => {
       }
       // Echo back to sender so they can confirm the round-trip if they want.
       try { sock.send(out); } catch { /* ignore */ }
+    } else if (msg.kind === "control-reset") {
+      controlState = {};
+      persistControlState();
+      const out = JSON.stringify({ kind: "control-snapshot", state: controlState, seq: nextSeq() });
+      for (const client of wss.clients) {
+        if (client.readyState === 1) {
+          try { client.send(out); } catch { /* ignore */ }
+        }
+      }
     } else if (msg.kind === "control-batch" && Array.isArray(msg.entries)) {
       for (const e of msg.entries) {
         if (e && typeof e.path === "string") setControlPath(e.path, e.value);

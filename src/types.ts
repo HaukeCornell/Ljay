@@ -120,6 +120,17 @@ export interface AudioCapture {
 
 // ---------- Vibes ----------
 
+/** Customizable per-vibe parameters surfaced to the control panel. Each vibe
+ * advertises which subset it consumes; unknown keys are ignored. */
+export interface VibeParams {
+  /** Primary color, hex (e.g. "#7cffb2"). */
+  color?: string;
+  /** Accent color, hex. */
+  accent?: string;
+  /** Audio-reactivity multiplier (1 = vibe default, 0 = inert, 2 = doubled). */
+  reactivity?: number;
+}
+
 /** A vibe owns its own three.js subtree (or DOM) and its own animation loop hook.
  * The host calls `update(audio, t)` each frame. */
 export interface Vibe {
@@ -133,6 +144,8 @@ export interface Vibe {
   unmount(): void;
   /** Optional — vibes may suggest a lyric font/animation. */
   lyricStyle?: LyricStyle;
+  /** Optional — apply a partial parameter update from the control panel. */
+  setParams?(params: VibeParams): void;
 }
 
 export interface VibeHost {
@@ -179,4 +192,7 @@ export interface AppState {
   lyricAnimationOverride: LyricAnimation | null;
   /** Auto-VJ: cycles vibe on every track change. */
   autoVibe: boolean;
+  /** Customizable per-vibe params, keyed by vibe id. Mirrored from sidecar
+   *  control state. The active vibe receives its slice via setParams(). */
+  effectParams: Record<string, VibeParams>;
 }

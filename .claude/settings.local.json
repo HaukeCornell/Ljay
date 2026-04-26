@@ -37,7 +37,9 @@
       "Bash(./node_modules/.bin/tsc --noEmit)",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__resize_page",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate",
-      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page"
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page",
+      "Bash(pkill -f \"sidecar/link_helper\")",
+      "Bash(curl -fsS -o /dev/null http://localhost:5173/control.html)"
     ]
   }
 }

@@ -201,6 +201,16 @@ export function setControlPath(path: string, value: unknown): void {
   }
 }
 
+/** Tell the sidecar to clear all control state. The sidecar replies with a
+ *  fresh empty snapshot which every connected peer applies. */
+export function resetControlState(): void {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    try { ws.send(JSON.stringify({ kind: "control-reset" })); } catch { /* ignore */ }
+  }
+  // Optimistic local clear; the sidecar's snapshot will overwrite shortly.
+  setSnapshot({});
+}
+
 // ─── Live preview audio: derive from Link when available ───────────────────
 //
 // When the sidecar reports a Link snapshot we can drive `setLiveAudio()` so

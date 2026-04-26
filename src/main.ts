@@ -124,6 +124,12 @@ async function boot() {
     activeVibe = v;
     activeVibeId = id;
     applyLyricStyle();
+    // Replay any cached params for this vibe (so user-customized colors / reactivity
+    // survive vibe swaps without requiring a re-edit on the panel).
+    const cached = getState().effectParams[id];
+    if (cached && v.setParams) {
+      try { v.setParams(cached); } catch (e) { console.warn("[ljay] vibe.setParams threw", e); }
+    }
   }
 
   /** Top-level vibe handler — handles "auto" specially. */
@@ -181,10 +187,28 @@ async function boot() {
     } else if (path === "videoMode" && typeof value === "string") {
       setVideoMode(value);
       bar.setVideoMode(value);
+    } else if (path.startsWith("videoOffsetMs.") && typeof value === "number") {
+      // Per-track offset: only apply when the keyed track is the current one.
+      const trackKey = path.slice("videoOffsetMs.".length);
+      const np = getState().nowPlaying;
+      const currentKey = np ? `${(np.title ?? "").toLowerCase().trim()}|${(np.artist ?? "").toLowerCase().trim()}` : "";
+      if (trackKey === currentKey) videoLayer.setOffsetMs(value);
+    } else if (path.startsWith("effectParams.")) {
+      // effectParams.<vibeId>.<key>
+      const parts = path.split(".");
+      if (parts.length === 3) {
+        const [, vibeId, key] = parts;
+        const cur = getState().effectParams[vibeId] ?? {};
+        const next: Record<string, unknown> = { ...cur, [key]: value };
+        setState({ effectParams: { ...getState().effectParams, [vibeId]: next } });
+        if (vibeId === activeVibeId && activeVibe?.setParams) {
+          try { activeVibe.setParams({ [key]: value }); }
+          catch (e) { console.warn("[ljay] vibe.setParams threw", e); }
+        }
+      }
     }
-    // effectParams.<id>.* and lyricParams.<id>.* are persisted in the sidecar
-    // for now but don't yet drive renderer state — the layer architecture
-    // migration will unlock per-vibe param uniforms.
+    // lyricParams.<id>.* and lyricsOffsetMs are persisted in the sidecar but
+    // don't yet drive renderer state — pending the layer architecture pass.
   }
 
   function applyControlSnapshot(state: Record<string, unknown>): void {
@@ -194,6 +218,21 @@ async function boot() {
     if (typeof state.lyricsVisible === "boolean") applyControlPath("lyricsVisible", state.lyricsVisible);
     if (typeof state.lyricsHold === "boolean") applyControlPath("lyricsHold", state.lyricsHold);
     if (typeof state.videoMode === "string") applyControlPath("videoMode", state.videoMode);
+    if (state.videoOffsetMs && typeof state.videoOffsetMs === "object") {
+      const m = state.videoOffsetMs as Record<string, unknown>;
+      for (const k of Object.keys(m)) {
+        if (typeof m[k] === "number") applyControlPath(`videoOffsetMs.${k}`, m[k]);
+      }
+    }
+    // Replay all effectParams entries (so new vibes pick up their saved colors).
+    if (state.effectParams && typeof state.effectParams === "object") {
+      const ep = state.effectParams as Record<string, Record<string, unknown>>;
+      for (const vibeId of Object.keys(ep)) {
+        for (const k of Object.keys(ep[vibeId])) {
+          applyControlPath(`effectParams.${vibeId}.${k}`, ep[vibeId][k]);
+        }
+      }
+    }
   }
 
   source.on((evt) => {

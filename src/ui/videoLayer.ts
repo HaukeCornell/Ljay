@@ -125,6 +125,19 @@ export class VideoLayer {
     });
   }
 
+  /** Direct override of the per-track sync offset, used by the control panel's
+   *  Video Sync slider. Persists through the same per-track cache as the
+   *  hotkey nudges. */
+  setOffsetMs(ms: number): void {
+    if (!Number.isFinite(ms)) return;
+    this.activeOffset = ms;
+    this.userNudgedThisTrack = true;
+    if (this.nowPlaying) {
+      this.offsets[offsetKey(this.nowPlaying)] = ms;
+      saveOffsets(this.offsets);
+    }
+  }
+
   setMode(mode: VideoMode): void {
     if (mode === this.mode) return;
     const wasOff = this.mode === "off";

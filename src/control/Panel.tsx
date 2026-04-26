@@ -15,7 +15,7 @@ import {
   fallbackRenderer,
   type RendererParams,
 } from "./renderers";
-import { setControlPath, useControlState } from "./state";
+import { resetControlState, setControlPath, useControlState } from "./state";
 
 type CSSObj = JSX.CSSProperties;
 
@@ -651,6 +651,7 @@ interface HeaderProps {
   beatPulse: number;
   elapsedSec: number;
   durationSec: number;
+  onReset: () => void;
 }
 
 function Header({
@@ -661,6 +662,7 @@ function Header({
   beatPulse,
   elapsedSec,
   durationSec,
+  onReset,
 }: HeaderProps) {
   const fmt = (s: number): string => {
     const sec = Math.max(0, Math.floor(s));
@@ -779,6 +781,25 @@ function Header({
             <span style={{ color: C.textMute }}>/ {fmt(durationSec)}</span>
           </div>
         </div>
+        <button
+          onClick={() => {
+            if (confirm("Reset all panel customization to defaults?")) onReset();
+          }}
+          title="Clear all colors / reactivity / offsets / selections"
+          style={{
+            padding: "6px 10px",
+            fontFamily: "JetBrains Mono",
+            fontSize: 10,
+            background: C.bg3,
+            border: `1px solid ${C.line}`,
+            color: C.textDim,
+            borderRadius: 6,
+            letterSpacing: 1,
+            textTransform: "uppercase",
+          }}
+        >
+          ▽ Reset
+        </button>
       </div>
     </div>
   );
@@ -1211,6 +1232,7 @@ export function Panel(): JSX.Element {
         beatPulse={v.beatPulse}
         elapsedSec={v.elapsedSec}
         durationSec={v.durationSec}
+        onReset={resetControlState}
       />
 
       <div

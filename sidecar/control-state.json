@@ -1,13 +1,12 @@
 {
-  "currentVibe": "minimal",
-  "lyricAnimation": "scroll",
+  "currentVibe": "halftone",
+  "videoMode": "off",
   "effectParams": {
     "halftone": {
-      "opacity": 0.895
-    },
-    "minimal": {
-      "opacity": 0.96
+      "opacity": 1,
+      "color": "#ff9344",
+      "accent": "#b8d8ff",
+      "reactivity": 1.5853658536585367
     }
-  },
-  "videoMode": "on"
+  }
 }

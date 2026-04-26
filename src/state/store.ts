@@ -13,6 +13,7 @@ const initial: AppState = {
   lyricsHold: false,
   lyricAnimationOverride: null,
   autoVibe: false,
+  effectParams: {},
 };
 
 let state: AppState = initial;

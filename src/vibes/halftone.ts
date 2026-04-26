@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { AudioFrame, LyricStyle, Vibe, VibeHost } from "../types.ts";
+import type { AudioFrame, LyricStyle, Vibe, VibeHost, VibeParams } from "../types.ts";
 
 // "Halftone" vibe: black ink dots on near-white paper, cell grid in screen
 // space. Designed to composite cleanly under MULTIPLY blend over a music
@@ -14,7 +14,15 @@ interface HalftoneUniforms {
   uBeat: { value: number };
   uLevel: { value: number };
   uRes: { value: THREE.Vector2 };
+  uInk: { value: THREE.Color };
+  uPaper: { value: THREE.Color };
+  uReact: { value: number };
   [k: string]: THREE.IUniform;
+}
+
+function parseHex(hex: string | undefined, fallback: number): THREE.Color {
+  if (typeof hex !== "string") return new THREE.Color(fallback);
+  try { return new THREE.Color(hex); } catch { return new THREE.Color(fallback); }
 }
 
 const VERT = /* glsl */ `
@@ -35,6 +43,9 @@ uniform float uTreble;
 uniform float uBeat;
 uniform float uLevel;
 uniform vec2  uRes;
+uniform vec3  uInk;
+uniform vec3  uPaper;
+uniform float uReact;
 
 // Cell size in screen pixels. ~30px feels right at 1080p; we keep it constant
 // in pixel space so the dots don't change density on resize.
@@ -95,11 +106,11 @@ void main() {
 
   // ---- Audio-driven dot radius ----
   // Base radius in pixels. Cap at ~CELL/2 so neighbors only just kiss.
-  float baseR = 4.5;                 // quiet baseline (small dots, paper-light)
-  float bassR = 9.0 * uBass;         // bass fattens globally → multiply darkens
-  float levelR = 4.0 * uLevel;
-  float waveR = 5.5 * (breath - 0.5); // spatial breathing across the page
-  float beatR = 3.5 * clamp(uBeat, 0.0, 1.0);
+  float baseR = 4.5;                              // quiet baseline
+  float bassR = 9.0 * uBass * uReact;             // bass fattens → multiply darkens
+  float levelR = 4.0 * uLevel * uReact;
+  float waveR = 5.5 * (breath - 0.5);             // spatial breathing
+  float beatR = 3.5 * clamp(uBeat, 0.0, 1.0) * uReact;
   float radiusPx = baseR + bassR + levelR + waveR + beatR;
   // Clamp to physical cell — keep at least a thin gap so it never goes solid black.
   radiusPx = clamp(radiusPx, 0.5, CELL_PX * 0.48);
@@ -115,12 +126,8 @@ void main() {
   float splat = step(0.92, h) * clamp(uBeat, 0.0, 1.0); // ~8% of cells when beat=1
   dot = mix(dot, 1.0 - dot, splat);
 
-  // ---- Compose colors ----
-  // Subtle warm tint kept very low-saturation.
-  vec3 paper = vec3(0.973, 0.969, 0.941); // ~#f8f7f0
-  vec3 ink   = vec3(0.039, 0.020, 0.063); // ~#0a0510
-
-  vec3 col = mix(paper, ink, dot);
+  // ---- Compose colors (panel-customizable via uInk + uPaper) ----
+  vec3 col = mix(uPaper, uInk, dot);
 
   // A barely-perceptible vignette so corners read slightly heavier in print.
   vec2 vp = vUv - 0.5;
@@ -155,6 +162,9 @@ export function create(): Vibe {
     uBeat: { value: 0 },
     uLevel: { value: 0 },
     uRes: { value: new THREE.Vector2(1, 1) },
+    uInk:   { value: new THREE.Color(0x0a0510) }, // panel: "color"
+    uPaper: { value: new THREE.Color(0xf8f7f0) }, // panel: "accent"
+    uReact: { value: 1.0 },
   };
 
   const lyricStyle: LyricStyle = {
@@ -220,6 +230,14 @@ export function create(): Vibe {
         uniforms.uLevel.value *= 0.9;
       }
       renderer.render(scene, camera);
+    },
+
+    setParams(p: VibeParams) {
+      if (p.color)  uniforms.uInk.value = parseHex(p.color, 0x0a0510);
+      if (p.accent) uniforms.uPaper.value = parseHex(p.accent, 0xf8f7f0);
+      if (typeof p.reactivity === "number") {
+        uniforms.uReact.value = Math.max(0, Math.min(3, p.reactivity));
+      }
     },
 
     unmount() {
