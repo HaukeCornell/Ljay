@@ -7,6 +7,7 @@ const initial: AppState = {
   nowPlaying: null,
   playhead: null,
   lyrics: null,
+  link: null,
   currentVibe: "winamp",
   lyricsVisible: true,
   lyricsHold: false,

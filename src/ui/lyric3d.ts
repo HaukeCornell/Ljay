@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 import { FontLoader, type Font } from "three/examples/jsm/loaders/FontLoader.js";
-import type { AudioFrame, LyricLine } from "../types";
+import type { AudioFrame, LinkState, LyricLine } from "../types";
 
 // Spatial 3D lyric renderer — solid extruded text that reacts to the music.
 //
@@ -137,6 +137,10 @@ export class Lyric3DRenderer {
   private currentLinesKey = "";
   /** Last-frame audio.beat; used to detect rising-edge "beat just fired". */
   private prevBeat = 0;
+  /** Last extrapolated Link beat (modulo quantum). Rising-edge of integer
+   *  part = "Link beat boundary just crossed", a much cleaner signal than
+   *  the energy-onset detector. */
+  private prevLinkBeatInt = -1;
   /** Cached colour objects we mutate in-place to avoid GC churn per frame. */
   private tmpColor = new THREE.Color();
   private warmColor = new THREE.Color(0xfff0d0);
@@ -238,20 +242,40 @@ export class Lyric3DRenderer {
     }
   }
 
-  update(positionMs: number, dtMs: number, audio: AudioFrame | null): void {
+  update(positionMs: number, dtMs: number, audio: AudioFrame | null, link: LinkState | null = null): void {
     if (!this.visible) return;
     this.positionMs = positionMs;
     const dt = Math.max(0.001, Math.min(0.1, dtMs / 1000));
     this.elapsed += dt;
 
-    // Detect "beat just fired" via rising edge on audio.beat.
-    const beat = audio?.beat ?? 0;
-    const beatRose = this.prevBeat < 0.5 && beat > 0.7;
-    this.prevBeat = beat;
+    // Beat detection: prefer Ableton Link (locked to Djay) when available,
+    // fall back to the audio-energy onset.
+    let beatRose = false;
+    if (link && link.bpm > 0) {
+      // Extrapolate link.beat forward locally so phase advances between
+      // sidecar polls (Link gives us ~30 polls/sec; RAF runs at 60).
+      const beatsPerMs = link.bpm / 60_000;
+      const elapsedSinceAnchor = performance.now() - link.anchorMs;
+      const beatNow = link.beat + elapsedSinceAnchor * beatsPerMs;
+      const beatInt = Math.floor(beatNow);
+      // Only trigger when transport is "playing" so we don't flash on silent
+      // session sync.
+      if (link.playing && beatInt !== this.prevLinkBeatInt) {
+        if (this.prevLinkBeatInt !== -1) beatRose = true;
+        this.prevLinkBeatInt = beatInt;
+      } else if (!link.playing) {
+        this.prevLinkBeatInt = beatInt;
+      }
+    }
+    const audioBeat = audio?.beat ?? 0;
+    const audioBeatRose = this.prevBeat < 0.5 && audioBeat > 0.7;
+    this.prevBeat = audioBeat;
+    // If Link is unavailable or not playing, fall back to audio onset.
+    if (!link || !link.playing || link.bpm === 0) beatRose = audioBeatRose;
 
     // Drive the accent light from audio level + beat.
     const lvl = audio?.level ?? 0;
-    this.accent.intensity = 0.6 + 0.7 * lvl + 0.6 * beat;
+    this.accent.intensity = 0.6 + 0.7 * lvl + 0.6 * (beatRose ? 1 : 0);
     // Tiny treble-driven hue lift on key light — almost unnoticeable, just alive.
     const treble = audio?.treble ?? 0;
     this.keyLight.color.setHSL(0.6 + treble * 0.05, 0.05, 0.85);

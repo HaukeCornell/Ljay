@@ -28,12 +28,33 @@ export interface Playhead {
   anchorMs: number;
 }
 
+/** Live Ableton Link snapshot, captured at the sidecar and rebased to the
+ * renderer's `performance.now()` clock. The renderer extrapolates phase
+ * forward locally between updates using `bpm`. */
+export interface LinkState {
+  /** Tempo in beats per minute. 0 if no peer is broadcasting. */
+  bpm: number;
+  /** Beat phase modulo `quantum`, in [0, quantum). */
+  phase: number;
+  /** Absolute beat count (modulo quantum) at `anchorMs`. */
+  beat: number;
+  /** Quantum the helper is using. Default 4 (one bar in 4/4). */
+  quantum: number;
+  /** Number of Link peers currently in the session. 0 = Djay Link off. */
+  peers: number;
+  /** True when the session transport is "playing". */
+  playing: boolean;
+  /** performance.now() at the moment the snapshot was captured. */
+  anchorMs: number;
+}
+
 /** Composite event emitted by every TrackSource. Renderer is free to ignore
  * fields it does not yet consume. */
 export interface TrackSourceEvent {
-  kind: "now-playing" | "playhead" | "stopped";
+  kind: "now-playing" | "playhead" | "stopped" | "link";
   track?: NowPlaying;
   playhead?: Playhead;
+  link?: LinkState;
   /** Monotonic counter so the consumer can detect dropped events. */
   seq: number;
 }
@@ -136,13 +157,15 @@ export interface LyricStyle {
 
 // ---------- App state ----------
 
-export type LyricAnimation = "scroll" | "typewriter" | "fade" | "bounce" | "snippet" | "spatial" | "subtitle" | "karaoke";
+export type LyricAnimation = "scroll" | "typewriter" | "fade" | "bounce" | "snippet" | "spatial" | "subtitle" | "karaoke" | "particles";
 
 export interface AppState {
   source: "offline" | "connecting" | "connected";
   nowPlaying: NowPlaying | null;
   playhead: Playhead | null;
   lyrics: Lyrics | null;
+  /** Latest Ableton Link snapshot if Djay's Link toggle is on; null otherwise. */
+  link: LinkState | null;
   currentVibe: string;
   lyricsVisible: boolean;
   /** Hold-mode: already-sung words stay visible on screen instead of fading out. */

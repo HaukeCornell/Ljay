@@ -51,6 +51,10 @@ export class MediaRemoteSource implements TrackSource {
     return { ...p, anchorMs: performance.now() };
   }
 
+  private rebaseLinkAnchor<T extends { anchorMs: number }>(l: T): T {
+    return { ...l, anchorMs: performance.now() };
+  }
+
   private emitStatus(s: "offline" | "connecting" | "connected") {
     for (const l of this.statusListeners) l(s);
   }
@@ -74,6 +78,7 @@ export class MediaRemoteSource implements TrackSource {
       try {
         const msg = JSON.parse(ev.data as string) as SidecarMsg;
         if (msg.playhead) msg.playhead = this.rebaseAnchor(msg.playhead);
+        if (msg.link)     msg.link = this.rebaseLinkAnchor(msg.link);
         for (const l of this.listeners) l(msg);
       } catch {
         // ignore malformed

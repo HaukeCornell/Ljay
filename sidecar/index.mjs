@@ -12,10 +12,11 @@
 //
 // Logs go to stderr only (stdout is reserved in case anyone pipes us).
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
+import { existsSync } from "node:fs";
 import { performance } from "node:perf_hooks";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import { handleHttp as handleMv } from "./mv.mjs";
@@ -25,7 +26,10 @@ import { handleHttp as handleMv } from "./mv.mjs";
 // ---------------------------------------------------------------------------
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolve(__dirname, "..");
 const HELPER_SRC = join(__dirname, "nowplaying_helper.swift");
+const LINK_HELPER_SRC = join(__dirname, "link_helper.cpp");
+const LINK_HELPER_BIN = join(__dirname, "link_helper");
 // We run the helper through `/usr/bin/swift` rather than compiling it.
 // Apple's MediaRemote framework returns empty data to unsigned/ad-hoc
 // binaries on macOS Sequoia+ but works fine when invoked through the
@@ -50,6 +54,8 @@ const nextSeq = () => ++seq;
 let lastNowPlayingEvent = null;
 /** Last "playhead" event we sent (for new-client burst). */
 let lastPlayheadEvent = null;
+/** Last "link" event we sent (for new-client burst). */
+let lastLinkEvent = null;
 /** True if our most recent terminal state was "stopped"; suppresses repeats. */
 let stoppedLatched = false;
 /** Last contentItemId we sent artwork for; only re-send artwork on change. */
@@ -65,6 +71,8 @@ function emit(event) {
   } else if (event.kind === "playhead") {
     lastPlayheadEvent = event;
     stoppedLatched = false;
+  } else if (event.kind === "link") {
+    lastLinkEvent = event;
   } else if (event.kind === "stopped") {
     // Keep lastNowPlaying/lastPlayhead so reconnecting clients still see the
     // last-known track context, but mark stopped so we won't re-emit.
@@ -131,6 +139,7 @@ wss.on("connection", (sock, req) => {
   try {
     if (lastNowPlayingEvent) sock.send(JSON.stringify(lastNowPlayingEvent));
     if (lastPlayheadEvent)   sock.send(JSON.stringify(lastPlayheadEvent));
+    if (lastLinkEvent)       sock.send(JSON.stringify(lastLinkEvent));
   } catch { /* ignore */ }
   sock.on("error", () => { /* ignore */ });
 });
@@ -292,6 +301,120 @@ function handleHelperFrame(f) {
 }
 
 // ---------------------------------------------------------------------------
+// Ableton Link helper — parallel C++ subprocess that joins the local Link
+// session and reports BPM + beat phase + peer count. JIT-built with clang++
+// on first run if the binary doesn't exist yet.
+// ---------------------------------------------------------------------------
+
+let linkHelper = null;
+let linkStdoutBuf = "";
+let linkPollTimer = null;
+let linkRespawns = 0;
+const LINK_HELPER_RESPAWN_MAX = 5;
+
+function ensureLinkHelperBuilt() {
+  if (existsSync(LINK_HELPER_BIN)) return true;
+  if (!existsSync(LINK_HELPER_SRC)) {
+    log("link helper source missing — skipping Link integration");
+    return false;
+  }
+  const linkRoot = join(PROJECT_ROOT, "vendor", "link");
+  if (!existsSync(linkRoot)) {
+    log("vendor/link missing — skipping Link integration. To enable: git clone https://github.com/Ableton/link.git vendor/link --recurse-submodules");
+    return false;
+  }
+  log("link helper missing, building with clang++…");
+  const r = spawnSync("clang++", [
+    "-std=c++17", "-O2",
+    "-I", join(linkRoot, "include"),
+    "-I", join(linkRoot, "extensions", "abl_link", "include"),
+    "-I", join(linkRoot, "modules", "asio-standalone", "asio", "include"),
+    "-DLINK_PLATFORM_MACOSX=1",
+    join(linkRoot, "extensions", "abl_link", "src", "abl_link.cpp"),
+    LINK_HELPER_SRC,
+    "-o", LINK_HELPER_BIN,
+    "-framework", "CoreFoundation",
+  ], { cwd: PROJECT_ROOT, stdio: ["ignore", "inherit", "inherit"] });
+  if (r.status !== 0) {
+    log(`link helper build failed (status=${r.status}); continuing without Link`);
+    return false;
+  }
+  log("link helper built ok.");
+  return true;
+}
+
+function startLinkHelper() {
+  if (!ensureLinkHelperBuilt()) return;
+  log("spawning link helper:", LINK_HELPER_BIN);
+  linkHelper = spawn(LINK_HELPER_BIN, [], { stdio: ["pipe", "pipe", "pipe"] });
+  linkStdoutBuf = "";
+
+  linkHelper.stdout.setEncoding("utf8");
+  linkHelper.stdout.on("data", onLinkStdout);
+  linkHelper.stderr.setEncoding("utf8");
+  linkHelper.stderr.on("data", (s) => {
+    const trimmed = s.trim();
+    if (trimmed) process.stderr.write("[link] " + s);
+  });
+
+  linkHelper.on("exit", (code, signal) => {
+    log(`link helper exited code=${code} signal=${signal}`);
+    if (shuttingDown) return;
+    if (linkRespawns >= LINK_HELPER_RESPAWN_MAX) {
+      log(`link helper respawn cap reached — giving up.`);
+      return;
+    }
+    linkRespawns++;
+    setTimeout(startLinkHelper, HELPER_RESPAWN_BACKOFF_MS);
+  });
+
+  linkHelper.on("error", (err) => {
+    log("link helper spawn error:", err.message);
+  });
+
+  if (linkPollTimer) clearInterval(linkPollTimer);
+  linkPollTimer = setInterval(linkPollTick, POLL_INTERVAL_MS);
+}
+
+function linkPollTick() {
+  if (!linkHelper || linkHelper.killed || !linkHelper.stdin.writable) return;
+  try { linkHelper.stdin.write("p\n"); }
+  catch (e) { log("failed to write link poll:", e.message); }
+}
+
+function onLinkStdout(chunk) {
+  linkStdoutBuf += chunk;
+  let nl;
+  while ((nl = linkStdoutBuf.indexOf("\n")) !== -1) {
+    const line = linkStdoutBuf.slice(0, nl).trim();
+    linkStdoutBuf = linkStdoutBuf.slice(nl + 1);
+    if (!line) continue;
+    let obj;
+    try { obj = JSON.parse(line); }
+    catch { log("bad JSON from link helper:", line.slice(0, 120)); continue; }
+    handleLinkFrame(obj);
+  }
+}
+
+/** A "link" event carries the renderer-side anchor: BPM + the beat phase
+ *  at the moment of capture, alongside an `anchorMs` (perf clock) so the
+ *  renderer can extrapolate phase locally between updates. */
+function handleLinkFrame(f) {
+  if (typeof f.bpm !== "number") return; // {ready:true} or malformed
+  linkRespawns = 0;
+  const link = {
+    bpm: f.bpm,
+    phase: typeof f.phase === "number" ? f.phase : 0,
+    beat: typeof f.beat === "number" ? f.beat : 0,
+    quantum: typeof f.quantum === "number" ? f.quantum : 4,
+    peers: typeof f.peers === "number" ? f.peers : 0,
+    playing: !!f.playing,
+    anchorMs: performance.now(),
+  };
+  emit({ kind: "link", link, seq: nextSeq() });
+}
+
+// ---------------------------------------------------------------------------
 // Shutdown
 // ---------------------------------------------------------------------------
 
@@ -300,13 +423,16 @@ function shutdown(signal) {
   shuttingDown = true;
   log(`received ${signal}, shutting down…`);
   if (pollTimer) clearInterval(pollTimer);
-  if (helper && !helper.killed) {
-    try { helper.stdin.write("q\n"); } catch { /* ignore */ }
-    setTimeout(() => {
-      if (helper && !helper.killed) {
-        try { helper.kill("SIGTERM"); } catch { /* ignore */ }
-      }
-    }, 250);
+  if (linkPollTimer) clearInterval(linkPollTimer);
+  for (const child of [helper, linkHelper]) {
+    if (child && !child.killed) {
+      try { child.stdin.write("q\n"); } catch { /* ignore */ }
+      setTimeout(() => {
+        if (child && !child.killed) {
+          try { child.kill("SIGTERM"); } catch { /* ignore */ }
+        }
+      }, 250);
+    }
   }
   try {
     wss.close();
@@ -326,3 +452,4 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 // ---------------------------------------------------------------------------
 
 startHelper();
+startLinkHelper();

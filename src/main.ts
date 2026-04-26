@@ -24,6 +24,7 @@ const VIDEO_MODES: ReadonlySet<VideoMode> = new Set([
 
 const LYRIC_MODE_META: { id: string; name: string }[] = [
   { id: "auto",       name: "Auto (vibe default)" },
+  { id: "particles",  name: "Particles (spectral field)" },
   { id: "spatial",    name: "Spatial 3D (fly-through)" },
   { id: "snippet",    name: "Snippet (word-windowed)" },
   { id: "karaoke",    name: "Karaoke (line wipe)" },
@@ -35,7 +36,7 @@ const LYRIC_MODE_META: { id: string; name: string }[] = [
 ];
 
 const LYRIC_ANIMATIONS: ReadonlySet<LyricAnimation> = new Set([
-  "scroll", "typewriter", "fade", "bounce", "snippet", "spatial", "subtitle", "karaoke",
+  "scroll", "typewriter", "fade", "bounce", "snippet", "spatial", "subtitle", "karaoke", "particles",
 ]);
 
 function loadStoredVibe(): string {
@@ -173,6 +174,8 @@ async function boot() {
       lastTrackKey = trackKey;
     } else if (evt.kind === "playhead" && evt.playhead) {
       setState({ playhead: evt.playhead });
+    } else if (evt.kind === "link" && evt.link) {
+      setState({ link: evt.link });
     } else if (evt.kind === "stopped") {
       setState({ nowPlaying: null, playhead: null });
       lyricsStore.clear();
@@ -207,6 +210,7 @@ async function boot() {
   });
 
   // ---- state → UI projections ----
+  const linkIndicator = document.getElementById("link-indicator");
   subscribe((s: AppState) => {
     if (s.nowPlaying) {
       bar.setNowPlaying(`${s.nowPlaying.title} — ${s.nowPlaying.artist || "?"}`);
@@ -216,13 +220,24 @@ async function boot() {
     // Picker always reflects the user's selection ("auto" or a specific id),
     // not the actually-rendered vibe (which can rotate underneath).
     bar.setVibe(s.currentVibe);
+
+    // Link indicator: show only when at least one peer is connected (i.e.,
+    // Djay's Link is on and broadcasting). Hidden otherwise.
+    if (linkIndicator) {
+      if (s.link && s.link.peers > 0) {
+        linkIndicator.textContent = `${s.link.bpm.toFixed(1)} BPM · ${s.link.peers} peer${s.link.peers === 1 ? "" : "s"}${s.link.playing ? "" : " · paused"}`;
+        linkIndicator.style.opacity = "1";
+      } else {
+        linkIndicator.style.opacity = "0";
+      }
+    }
   });
 
   // ---- per-frame lyric + video advance ----
   function tick() {
     const s = getState();
     const pos = extrapolate(s.playhead, performance.now());
-    lyricScene.update(pos, s.lyrics?.lines ?? null, latestAudio);
+    lyricScene.update(pos, s.lyrics?.lines ?? null, latestAudio, s.link);
     videoLayer.update(s.playhead);
     requestAnimationFrame(tick);
   }

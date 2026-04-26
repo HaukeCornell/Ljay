@@ -1,5 +1,6 @@
-import type { AudioFrame, LyricLine, LyricStyle } from "../types";
+import type { AudioFrame, LinkState, LyricLine, LyricStyle } from "../types";
 import { Lyric3DRenderer } from "./lyric3d";
+import { LyricParticlesRenderer } from "./lyricParticles";
 
 const SCRUB_THRESHOLD_MS = 1500;
 
@@ -21,8 +22,10 @@ export class LyricScene {
   private visible = true;
   private hold = false;
   private spatial: Lyric3DRenderer | null = null;
+  private particles: LyricParticlesRenderer | null = null;
   private lastPositionForSpatial = 0;
   private lastSpatialTickT = 0;
+  private lastParticlesTickT = 0;
   private currentIndex = -1;
   private prevIndex = -1;
   private lastPositionMs = 0;
@@ -55,17 +58,32 @@ export class LyricScene {
     this.syncSpatialMode();
   }
 
-  /** Mount or unmount the 3D spatial renderer based on the active animation. */
+  /** Mount or unmount the 3D spatial / particles renderers based on
+   *  the active animation. Both modes own the lyric layer entirely. */
   private syncSpatialMode(): void {
-    const want = this.style.animation === "spatial";
-    if (want && !this.spatial) {
-      // Hide the DOM lyric nodes — the 3D layer will render lyrics instead.
+    const wantSpatial = this.style.animation === "spatial";
+    const wantParticles = this.style.animation === "particles";
+    const wantOwnsLyrics = wantSpatial || wantParticles;
+
+    if (wantSpatial && !this.spatial) {
       this.currentEl.style.display = "none";
       this.nextEl.style.display = "none";
       this.spatial = new Lyric3DRenderer(this.host);
-    } else if (!want && this.spatial) {
+    } else if (!wantSpatial && this.spatial) {
       this.spatial.unmount();
       this.spatial = null;
+    }
+
+    if (wantParticles && !this.particles) {
+      this.currentEl.style.display = "none";
+      this.nextEl.style.display = "none";
+      this.particles = new LyricParticlesRenderer(this.host);
+    } else if (!wantParticles && this.particles) {
+      this.particles.unmount();
+      this.particles = null;
+    }
+
+    if (!wantOwnsLyrics) {
       this.currentEl.style.display = "";
       this.nextEl.style.display = "";
     }
@@ -75,23 +93,34 @@ export class LyricScene {
     this.visible = v;
     this.host.style.display = v ? "" : "none";
     this.spatial?.setVisible(v);
+    this.particles?.setVisible(v);
   }
 
   setHold(v: boolean): void {
     this.hold = v;
   }
 
-  update(positionMs: number, lines: LyricLine[] | null, audio: AudioFrame | null = null): void {
+  update(positionMs: number, lines: LyricLine[] | null, audio: AudioFrame | null = null, link: LinkState | null = null): void {
     if (!this.visible || this.disposed) return;
 
-    // Spatial 3D mode owns its own renderer — feed it position + dt + audio.
+    // Spatial 3D mode owns its own renderer — feed it position + dt + audio + link.
     if (this.spatial) {
       const now = performance.now();
       const dtMs = this.lastSpatialTickT === 0 ? 16 : Math.max(1, Math.min(64, now - this.lastSpatialTickT));
       this.lastSpatialTickT = now;
       this.spatial.setLines(lines);
-      this.spatial.update(positionMs, dtMs, audio);
+      this.spatial.update(positionMs, dtMs, audio, link);
       this.lastPositionForSpatial = positionMs;
+      return;
+    }
+
+    // Particles mode also owns its own renderer.
+    if (this.particles) {
+      const now = performance.now();
+      const dtMs = this.lastParticlesTickT === 0 ? 16 : Math.max(1, Math.min(64, now - this.lastParticlesTickT));
+      this.lastParticlesTickT = now;
+      this.particles.setLines(lines);
+      this.particles.update(positionMs, dtMs, audio, link);
       return;
     }
 
@@ -132,6 +161,8 @@ export class LyricScene {
     }
     this.spatial?.unmount();
     this.spatial = null;
+    this.particles?.unmount();
+    this.particles = null;
     this.host.replaceChildren();
   }
 
