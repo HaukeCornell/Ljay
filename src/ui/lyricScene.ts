@@ -1,4 +1,4 @@
-import type { LyricLine, LyricStyle } from "../types";
+import type { AudioFrame, LyricLine, LyricStyle } from "../types";
 import { Lyric3DRenderer } from "./lyric3d";
 
 const SCRUB_THRESHOLD_MS = 1500;
@@ -81,16 +81,16 @@ export class LyricScene {
     this.hold = v;
   }
 
-  update(positionMs: number, lines: LyricLine[] | null): void {
+  update(positionMs: number, lines: LyricLine[] | null, audio: AudioFrame | null = null): void {
     if (!this.visible || this.disposed) return;
 
-    // Spatial 3D mode owns its own renderer — feed it position + dt.
+    // Spatial 3D mode owns its own renderer — feed it position + dt + audio.
     if (this.spatial) {
       const now = performance.now();
       const dtMs = this.lastSpatialTickT === 0 ? 16 : Math.max(1, Math.min(64, now - this.lastSpatialTickT));
       this.lastSpatialTickT = now;
       this.spatial.setLines(lines);
-      this.spatial.update(positionMs, dtMs);
+      this.spatial.update(positionMs, dtMs, audio);
       this.lastPositionForSpatial = positionMs;
       return;
     }

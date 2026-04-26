@@ -23,7 +23,11 @@
       "Bash(pkill -f \"concurrently\")",
       "Bash(pkill -f \"/usr/bin/swift\")",
       "Bash(yt-dlp --version)",
-      "Bash(pkill -f \"node /Users/haukesandhaus/Documents/GitHub/Ljay/node_modules/.bin/vite\")"
+      "Bash(pkill -f \"node /Users/haukesandhaus/Documents/GitHub/Ljay/node_modules/.bin/vite\")",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:ableton.github.io)",
+      "Bash(curl -sI http://localhost:5173/fonts/helvetiker_bold.typeface.json)"
     ]
   }
 }

@@ -1,4 +1,4 @@
-import type { AppState, LyricAnimation, LyricStyle, Vibe } from "./types";
+import type { AppState, AudioFrame, LyricAnimation, LyricStyle, Vibe } from "./types";
 import { getState, setState, subscribe } from "./state/store";
 import { MediaRemoteSource, extrapolate } from "./sources/mediaRemoteSource";
 import { LrclibResolver } from "./lyrics/lrclib";
@@ -84,8 +84,15 @@ async function boot() {
   const lyricsStore = new LyricsStore(new LrclibResolver(), new LyricsCache());
 
   // ---- audio capture (best-effort; falls back to synthetic) ----
+  // The vibe pipeline (via Stage) and the spatial lyric renderer both need
+  // live AudioFrames. Stage decays stale frames internally; we mirror the
+  // raw latest frame in `latestAudio` for the lyric layer to read each tick.
+  let latestAudio: AudioFrame | null = null;
   const capture = new WebAudioCapture();
-  capture.on((f) => stage.feedAudio(f));
+  capture.on((f) => {
+    stage.feedAudio(f);
+    latestAudio = f;
+  });
 
   // ---- vibe management ----
   let activeVibe: Vibe | null = null;
@@ -213,7 +220,7 @@ async function boot() {
   function tick() {
     const s = getState();
     const pos = extrapolate(s.playhead, performance.now());
-    lyricScene.update(pos, s.lyrics?.lines ?? null);
+    lyricScene.update(pos, s.lyrics?.lines ?? null, latestAudio);
     videoLayer.update(s.playhead);
     requestAnimationFrame(tick);
   }
