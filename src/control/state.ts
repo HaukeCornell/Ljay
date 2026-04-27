@@ -29,8 +29,12 @@ type ControlSnapshot = {
   currentVibe?: string;
   /** Multi-toggle: which effect ids are mounted as Stage layers right now. */
   effectsEnabled?: Record<string, boolean>;
+  /** Auto-VJ: cycles vibe on every track change. */
+  autoVibe?: boolean;
   lyricAnimation?: string;
   lyricsVisible?: boolean;
+  /** Hold-mode: already-sung words stay visible on screen. */
+  lyricsHold?: boolean;
   videoMode?: string;
   effectParams?: Record<string, Partial<EffectParams>>;
   lyricParams?: Record<string, Partial<EffectParams>>;
@@ -267,8 +271,12 @@ export interface UseControlStateResult extends ControlState {
   currentVibe: string;
   /** True iff the named effect is mounted as a layer right now. */
   isEffectEnabled: (id: string) => boolean;
+  /** Auto-VJ active — renderer cycles vibe on each new track. */
+  autoVibe: boolean;
   lyricAnimation: string;
   lyricsVisible: boolean;
+  /** Already-sung words stay on screen instead of fading out. */
+  lyricsHold: boolean;
   videoMode: string;
   /** Returns merged params for an effect id (catalog defaults + snapshot). */
   effectParams: (id: string) => EffectParams;
@@ -352,8 +360,10 @@ export function useControlState(): UseControlStateResult {
     return snap.currentVibe === id;
   };
   const currentVibe = snap.currentVibe ?? "halftone";
+  const autoVibe = snap.autoVibe ?? false;
   const lyricAnimation = snap.lyricAnimation ?? "auto";
   const lyricsVisible = snap.lyricsVisible ?? true;
+  const lyricsHold = snap.lyricsHold ?? false;
   const videoMode = snap.videoMode ?? "off";
 
   const effectParams = (id: string): EffectParams => {
@@ -380,8 +390,10 @@ export function useControlState(): UseControlStateResult {
     beatPulse,
     currentVibe,
     isEffectEnabled,
+    autoVibe,
     lyricAnimation,
     lyricsVisible,
+    lyricsHold,
     videoMode,
     effectParams,
     lyricParams,

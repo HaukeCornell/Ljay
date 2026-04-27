@@ -194,6 +194,10 @@ export class LyricParticlesRenderer {
   private prevLinkBeatInt = -1;
   private prevAudioBeat = 0;
   private glow = 0;
+  /** Panel-driven reactivity multiplier (1 = vibe default). */
+  private reactivity = 1;
+  /** Hold mode: keep particles locked on the most recent word during gaps. */
+  private hold = false;
 
   constructor(host: HTMLElement) {
     this.host = host;
@@ -277,6 +281,20 @@ export class LyricParticlesRenderer {
     if (this.visible === v) return;
     this.visible = v;
     this.canvas.style.display = v ? "" : "none";
+  }
+
+  setHold(v: boolean): void {
+    this.hold = v;
+  }
+
+  /** Apply panel-driven overrides. `color`/`accent` recolor the particle
+   *  cloud; `reactivity` scales the bass jitter and beat kick. */
+  setColors(o: { color?: string; accent?: string; reactivity?: number }): void {
+    if (typeof o.color === "string") this.pU.uColorA.value.set(o.color);
+    if (typeof o.accent === "string") this.pU.uColorB.value.set(o.accent);
+    if (typeof o.reactivity === "number" && Number.isFinite(o.reactivity)) {
+      this.reactivity = Math.max(0, o.reactivity);
+    }
   }
 
   setLines(lines: LyricLine[] | null): void {
@@ -385,7 +403,10 @@ export class LyricParticlesRenderer {
     const bass = audio?.bass ?? 0;
     const level = audio?.level ?? 0;
 
-    const targetCohesion = this.activeTimingIdx >= 0 ? 1.0 : 0.55;
+    // Hold mode: when no word is currently active but we have one onscreen,
+    // keep the particles locked on it instead of dispersing.
+    const hasFormation = this.currentWord !== null;
+    const targetCohesion = (this.activeTimingIdx >= 0 || (this.hold && hasFormation)) ? 1.0 : 0.55;
     this.cohesion += (targetCohesion - this.cohesion) * Math.min(1, dt * 4);
 
     if (this.pHomeNext) {
@@ -396,8 +417,9 @@ export class LyricParticlesRenderer {
       }
     }
 
-    const kickMag = beatRose ? BEAT_KICK * (downbeat ? DOWNBEAT_MULT : 1) * (0.5 + bass) : 0;
-    const jitter = bass * BASS_JITTER * dt;
+    const r = this.reactivity;
+    const kickMag = beatRose ? BEAT_KICK * (downbeat ? DOWNBEAT_MULT : 1) * (0.5 + bass) * r : 0;
+    const jitter = bass * BASS_JITTER * dt * r;
 
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const hcx = this.pHomeCur[i * 2 + 0];

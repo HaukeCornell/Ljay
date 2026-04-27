@@ -39,7 +39,16 @@
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__emulate",
       "mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page",
       "Bash(pkill -f \"sidecar/link_helper\")",
-      "Bash(curl -fsS -o /dev/null http://localhost:5173/control.html)"
+      "Bash(curl -fsS -o /dev/null http://localhost:5173/control.html)",
+      "Bash(pkill -f vite)",
+      "Bash(sips -Z 1800 /tmp/ljay_renderer.jpeg --out /tmp/ljay_renderer_small.jpeg)",
+      "Bash(sips -g pixelWidth -g pixelHeight /tmp/ljay_renderer_small.jpeg)",
+      "Bash(sips -Z 1800 /tmp/ljay_chip_hover.jpeg --out /tmp/ljay_chip_hover_small.jpeg)",
+      "Bash(sips -Z 1800 /tmp/ljay_panel.jpeg --out /tmp/ljay_panel_small.jpeg)",
+      "Bash(python3 -m json.tool)",
+      "Bash(sips -Z 1800 /tmp/ljay_panel_v2.jpeg --out /tmp/ljay_panel_v2_small.jpeg)",
+      "Bash(sips -g pixelWidth -g pixelHeight /tmp/ljay_panel_v2_small.jpeg)",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('sidecar/control-state.json'\\)\\); print\\(json.dumps\\(d.get\\('lyricParams', {}\\), indent=2\\)\\)\")"
     ]
   }
 }

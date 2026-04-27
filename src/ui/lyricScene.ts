@@ -19,6 +19,9 @@ export class LyricScene {
   private nextEl: HTMLDivElement;
   private styleEl: HTMLStyleElement;
   private style: LyricStyle = DEFAULT_STYLE;
+  /** Panel-driven overrides keyed off the active animation. Merged on top of
+   *  whatever the active vibe's `lyricStyle` provided. */
+  private overrides: { color?: string; accent?: string; reactivity?: number } = {};
   private visible = true;
   private hold = false;
   private spatial: Lyric3DRenderer | null = null;
@@ -56,6 +59,29 @@ export class LyricScene {
     this.style = { ...DEFAULT_STYLE, ...style };
     this.applyStyle();
     this.syncSpatialMode();
+    // Re-apply existing panel overrides so spatial/particles renderers
+    // adopt the panel's color/reactivity even after a fresh mount.
+    this.pushOverridesToRenderers();
+  }
+
+  /** Apply panel-driven param overrides (color / accent / reactivity) for
+   *  the currently-active animation. Pass `{}` to clear. */
+  setOverrides(o: { color?: string; accent?: string; reactivity?: number }): void {
+    this.overrides = { ...this.overrides, ...o };
+    this.applyStyle();
+    this.pushOverridesToRenderers();
+  }
+
+  private pushOverridesToRenderers(): void {
+    // The merged values that should drive renderers: panel override beats
+    // vibe lyricStyle default (only `color` lives on LyricStyle today).
+    const merged = {
+      color: this.overrides.color ?? this.style.color,
+      accent: this.overrides.accent,
+      reactivity: this.overrides.reactivity,
+    };
+    this.spatial?.setColors(merged);
+    this.particles?.setColors(merged);
   }
 
   /** Mount or unmount the 3D spatial / particles renderers based on
@@ -69,6 +95,7 @@ export class LyricScene {
       this.currentEl.style.display = "none";
       this.nextEl.style.display = "none";
       this.spatial = new Lyric3DRenderer(this.host);
+      this.spatial.setHold(this.hold);
     } else if (!wantSpatial && this.spatial) {
       this.spatial.unmount();
       this.spatial = null;
@@ -78,6 +105,7 @@ export class LyricScene {
       this.currentEl.style.display = "none";
       this.nextEl.style.display = "none";
       this.particles = new LyricParticlesRenderer(this.host);
+      this.particles.setHold(this.hold);
     } else if (!wantParticles && this.particles) {
       this.particles.unmount();
       this.particles = null;
@@ -98,6 +126,8 @@ export class LyricScene {
 
   setHold(v: boolean): void {
     this.hold = v;
+    this.spatial?.setHold(v);
+    this.particles?.setHold(v);
   }
 
   update(positionMs: number, lines: LyricLine[] | null, audio: AudioFrame | null = null, link: LinkState | null = null): void {
@@ -171,10 +201,11 @@ export class LyricScene {
   private applyStyle(): void {
     const s = this.style;
     const transform = s.uppercase ? "uppercase" : "none";
+    const color = this.overrides.color ?? s.color;
     for (const el of [this.currentEl, this.nextEl]) {
       el.style.fontFamily = s.font;
       el.style.fontWeight = String(s.weight);
-      el.style.color = s.color;
+      el.style.color = color;
       el.style.textShadow = s.shadow ?? "";
       el.style.textTransform = transform;
     }

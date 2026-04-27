@@ -149,6 +149,11 @@ export class Lyric3DRenderer {
   private emissiveBase = new THREE.Color(0x223355);
   private emissiveHot = new THREE.Color(0x88aaff);
 
+  /** Panel-driven reactivity multiplier. 1.0 = vibe defaults. */
+  private reactivity = 1;
+  /** Hold mode: keep sung words glowing past their endMs window. */
+  private hold = false;
+
   constructor(host: HTMLElement) {
     this.host = host;
     this.canvas = document.createElement("canvas");
@@ -212,6 +217,20 @@ export class Lyric3DRenderer {
     if (this.visible === v) return;
     this.visible = v;
     this.canvas.style.display = v ? "" : "none";
+  }
+
+  setHold(v: boolean): void {
+    this.hold = v;
+  }
+
+  /** Apply panel-driven overrides. `color` becomes the word body, `accent` the
+   *  beat-flash emissive, `reactivity` scales beat punch / emissive flash. */
+  setColors(o: { color?: string; accent?: string; reactivity?: number }): void {
+    if (typeof o.color === "string") this.baseColor.set(o.color);
+    if (typeof o.accent === "string") this.emissiveHot.set(o.accent);
+    if (typeof o.reactivity === "number" && Number.isFinite(o.reactivity)) {
+      this.reactivity = Math.max(0, o.reactivity);
+    }
   }
 
   setLines(lines: LyricLine[] | null): void {
@@ -416,7 +435,11 @@ export class Lyric3DRenderer {
       w.mesh.position.set(w.lineSlot + jx, y, z);
 
       // ---- Activation spring (time-window driven) ----
-      const inside = this.positionMs >= w.startMs - 80 && this.positionMs <= w.endMs + 200;
+      // Hold-mode extends the "inside" window indefinitely past endMs so
+      // already-sung words stay glowing as the camera flies past them.
+      const beforeStart = this.positionMs >= w.startMs - 80;
+      const beforeEnd = this.hold ? true : this.positionMs <= w.endMs + 200;
+      const inside = beforeStart && beforeEnd;
       const target = inside ? 1.0 : 0.0;
       const accel = (target - w.active) * SPRING_STIFFNESS - w.scaleVel * SPRING_DAMPING;
       w.scaleVel += accel * dt;
@@ -426,14 +449,15 @@ export class Lyric3DRenderer {
 
       // ---- Punch spring (beat driven) ----
       // On a fresh beat, kick the velocity of every visible word — the active
-      // ones bounce harder.
+      // ones bounce harder. Reactivity scales the entire kick magnitude.
       if (beatRose) {
-        const kick = (inside ? 6 : 1.5) + bass * 4;
+        const r = this.reactivity;
+        const kick = ((inside ? 6 : 1.5) + bass * 4) * r;
         w.punchVel += kick;
         // Emissive flash, slightly stronger on currently-sung words.
-        w.emissive = Math.max(w.emissive, (inside ? 0.85 : 0.55) + bass * 0.4);
+        w.emissive = Math.max(w.emissive, ((inside ? 0.85 : 0.55) + bass * 0.4) * r);
         // A small Y rotation impulse on active words for liveliness.
-        if (inside) w.rotYImpulse += 0.12;
+        if (inside) w.rotYImpulse += 0.12 * r;
       }
       const pAccel = (0 - w.punch) * PUNCH_STIFFNESS - w.punchVel * PUNCH_DAMPING;
       w.punchVel += pAccel * dt;

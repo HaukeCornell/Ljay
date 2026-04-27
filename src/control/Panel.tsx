@@ -8,7 +8,7 @@
 import { useMemo, useRef, useState } from "preact/hooks";
 import type { JSX } from "preact";
 import { C } from "./colors";
-import { EFFECTS, LYRIC_STYLES } from "./catalog";
+import { EFFECTS, LYRIC_STYLES, lyricSupportsHold } from "./catalog";
 import { PreviewCanvas } from "./PreviewCanvas";
 import {
   Renderers,
@@ -651,6 +651,8 @@ interface HeaderProps {
   beatPulse: number;
   elapsedSec: number;
   durationSec: number;
+  autoVibe: boolean;
+  onAutoVibeToggle: () => void;
   onReset: () => void;
 }
 
@@ -662,6 +664,8 @@ function Header({
   beatPulse,
   elapsedSec,
   durationSec,
+  autoVibe,
+  onAutoVibeToggle,
   onReset,
 }: HeaderProps) {
   const fmt = (s: number): string => {
@@ -781,6 +785,23 @@ function Header({
             <span style={{ color: C.textMute }}>/ {fmt(durationSec)}</span>
           </div>
         </div>
+        <button
+          onClick={onAutoVibeToggle}
+          title="Auto-VJ — pick a fresh vibe on every new track"
+          style={{
+            padding: "6px 12px",
+            fontFamily: "JetBrains Mono",
+            fontSize: 10,
+            background: autoVibe ? `${C.accent}20` : C.bg3,
+            border: `1px solid ${autoVibe ? C.accent : C.line}`,
+            color: autoVibe ? C.accent : C.textDim,
+            borderRadius: 999,
+            letterSpacing: 1,
+            textTransform: "uppercase",
+          }}
+        >
+          Auto-VJ {autoVibe ? "On" : "Off"}
+        </button>
         <button
           onClick={() => {
             if (confirm("Reset all panel customization to defaults?")) onReset();
@@ -1188,6 +1209,12 @@ export function Panel(): JSX.Element {
   const toggleLyricEnabled = (): void => {
     setControlPath("lyricsVisible", !v.lyricsVisible);
   };
+  const toggleLyricHold = (): void => {
+    setControlPath("lyricsHold", !v.lyricsHold);
+  };
+  const toggleAutoVibe = (): void => {
+    setControlPath("autoVibe", !v.autoVibe);
+  };
 
   // Sync nudges
   const nudgeLyrics = (d: number): void => {
@@ -1230,6 +1257,8 @@ export function Panel(): JSX.Element {
         beatPulse={v.beatPulse}
         elapsedSec={v.elapsedSec}
         durationSec={v.durationSec}
+        autoVibe={v.autoVibe}
+        onAutoVibeToggle={toggleAutoVibe}
         onReset={resetControlState}
       />
 
@@ -1320,6 +1349,37 @@ export function Panel(): JSX.Element {
             >
               {v.lyricsVisible ? "On" : "Off"}
             </button>
+            {(() => {
+              const holdSupported = v.lyricAnimation === "auto" || lyricSupportsHold(v.lyricAnimation);
+              const enabled = holdSupported && v.lyricsVisible;
+              const isOn = holdSupported && v.lyricsHold;
+              return (
+                <button
+                  onClick={enabled ? toggleLyricHold : undefined}
+                  disabled={!enabled}
+                  title={
+                    !holdSupported
+                      ? "Hold doesn't apply to this lyric style — only multi-word styles (Spatial 3D, Particles, Snippet) keep already-sung words around."
+                      : "Hold — keep already-sung words on screen instead of fading them"
+                  }
+                  style={{
+                    padding: "4px 12px",
+                    borderRadius: 999,
+                    background: isOn ? `${C.accent}20` : C.bg3,
+                    border: `1px solid ${isOn ? C.accent : C.line}`,
+                    color: isOn ? C.accent : C.textDim,
+                    fontFamily: "JetBrains Mono",
+                    fontSize: 10,
+                    letterSpacing: 1,
+                    textTransform: "uppercase",
+                    opacity: enabled ? 1 : 0.4,
+                    cursor: enabled ? "pointer" : "not-allowed",
+                  }}
+                >
+                  Hold {isOn ? "On" : "Off"}
+                </button>
+              );
+            })()}
           </div>
           <div
             style={{

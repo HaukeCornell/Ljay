@@ -5,9 +5,8 @@ import { LrclibResolver } from "./lyrics/lrclib";
 import { LyricsCache } from "./lyrics/cache";
 import { LyricsStore } from "./lyrics/store";
 import { Stage } from "./renderer/scene";
-import { listVibes, vibes as vibeFactories, AUTO_CYCLE_IDS } from "./vibes/registry";
+import { vibes as vibeFactories, AUTO_CYCLE_IDS } from "./vibes/registry";
 import { LyricScene } from "./ui/lyricScene";
-import { mountControlBar } from "./ui/controlBar";
 import { WebAudioCapture } from "./audio/capture";
 import { VideoLayer, type VideoMode } from "./ui/videoLayer";
 
@@ -21,19 +20,6 @@ const DEFAULT_VIDEO_MODE = "off";
 const VIDEO_MODES: ReadonlySet<VideoMode> = new Set([
   "off", "on", "screen", "multiply", "difference",
 ]);
-
-const LYRIC_MODE_META: { id: string; name: string }[] = [
-  { id: "auto",       name: "Auto (vibe default)" },
-  { id: "particles",  name: "Particles (spectral field)" },
-  { id: "spatial",    name: "Spatial 3D (fly-through)" },
-  { id: "snippet",    name: "Snippet (word-windowed)" },
-  { id: "karaoke",    name: "Karaoke (line wipe)" },
-  { id: "subtitle",   name: "Subtitle (broadcast band)" },
-  { id: "scroll",     name: "Scroll (line scroll)" },
-  { id: "fade",       name: "Fade" },
-  { id: "typewriter", name: "Typewriter" },
-  { id: "bounce",     name: "Bounce" },
-];
 
 const LYRIC_ANIMATIONS: ReadonlySet<LyricAnimation> = new Set([
   "scroll", "typewriter", "fade", "bounce", "snippet", "spatial", "subtitle", "karaoke", "particles",
@@ -72,7 +58,6 @@ function pickRandomVibeId(excluding: string | null): string {
 async function boot() {
   const stageHost = document.getElementById("stage")!;
   const lyricHost = document.getElementById("lyrics")!;
-  const controlHost = document.getElementById("control-bar")!;
 
   // ---- renderer ----
   const stage = new Stage(stageHost);
@@ -107,6 +92,28 @@ async function boot() {
   /** Whether the picker is in "Auto" mode. */
   let autoMode = false;
 
+  // Panel-driven per-style overrides (color / accent / reactivity), keyed by
+  // lyric style id. The active style's slice is forwarded to LyricScene
+  // whenever it changes or the active animation switches.
+  const lyricParamsByStyle: Record<string, { color?: string; accent?: string; reactivity?: number }> = {};
+
+  function resolveActiveLyricAnimation(): string {
+    const override = getState().lyricAnimationOverride;
+    if (override) return override;
+    const top = topVibeId ? activeVibes.get(topVibeId) : null;
+    return top?.lyricStyle?.animation ?? "scroll";
+  }
+
+  function pushLyricOverridesForActive(): void {
+    const id = resolveActiveLyricAnimation();
+    const params = lyricParamsByStyle[id] ?? {};
+    lyricScene.setOverrides({
+      color: params.color,
+      accent: params.accent,
+      reactivity: params.reactivity,
+    });
+  }
+
   function applyLyricStyle(): void {
     const top = topVibeId ? activeVibes.get(topVibeId) : null;
     if (!top?.lyricStyle) return;
@@ -115,6 +122,7 @@ async function boot() {
       ? { ...top.lyricStyle, animation: override }
       : top.lyricStyle;
     lyricScene.setStyle(finalStyle);
+    pushLyricOverridesForActive();
   }
 
   function applyParamsToVibe(id: string, vibe: Vibe): void {
@@ -208,7 +216,7 @@ async function boot() {
   let lastTrackKey = "";
   source.onStatus((s) => {
     setState({ source: s });
-    bar.setStatus(s);
+    launcher.setStatus(s);
   });
   /** Apply a single control-plane mutation from the panel side. Recognised
    *  paths drive specific local state. Unknown paths are silently ignored
@@ -216,20 +224,22 @@ async function boot() {
   function applyControlPath(path: string, value: unknown): void {
     if (path === "currentVibe" && typeof value === "string") {
       void setVibeSelection(value);
+    } else if (path === "autoVibe" && typeof value === "boolean") {
+      autoMode = value;
+      setState({ autoVibe: value });
+      if (value && activeVibes.size === 0) {
+        void enableVibe(pickRandomVibeId(null));
+      }
     } else if (path === "lyricAnimation" && typeof value === "string") {
       setLyricMode(value);
-      bar.setLyricMode(value);
     } else if (path === "lyricsVisible" && typeof value === "boolean") {
       setState({ lyricsVisible: value });
       lyricScene.setVisible(value);
-      bar.setLyricsVisible(value);
     } else if (path === "lyricsHold" && typeof value === "boolean") {
       setState({ lyricsHold: value });
       lyricScene.setHold(value);
-      bar.setHold(value);
     } else if (path === "videoMode" && typeof value === "string") {
       setVideoMode(value);
-      bar.setVideoMode(value);
     } else if (path.startsWith("videoOffsetMs.") && typeof value === "number") {
       // Per-track offset: only apply when the keyed track is the current one.
       const trackKey = path.slice("videoOffsetMs.".length);
@@ -258,9 +268,21 @@ async function boot() {
           stage.setLayerOpacity(vibeId, value);
         }
       }
+    } else if (path.startsWith("lyricParams.")) {
+      // lyricParams.<styleId>.<key>
+      const parts = path.split(".");
+      if (parts.length === 3) {
+        const [, styleId, key] = parts;
+        const cur = lyricParamsByStyle[styleId] ?? {};
+        lyricParamsByStyle[styleId] = { ...cur, [key]: value };
+        // If this style is the active animation right now, push to the scene.
+        if (styleId === resolveActiveLyricAnimation()) {
+          pushLyricOverridesForActive();
+        }
+      }
     }
-    // lyricParams.<id>.* and lyricsOffsetMs are persisted in the sidecar but
-    // don't yet drive renderer state — pending the layer architecture pass.
+    // lyricsOffsetMs is persisted in the sidecar but doesn't yet drive
+    // renderer state — pending the lyric-offset pass.
   }
 
   function applyControlSnapshot(state: Record<string, unknown>): void {
@@ -275,6 +297,7 @@ async function boot() {
       // Backward-compat snapshot from v0.13: only currentVibe was set.
       applyControlPath("currentVibe", state.currentVibe);
     }
+    if (typeof state.autoVibe === "boolean") applyControlPath("autoVibe", state.autoVibe);
     if (typeof state.lyricAnimation === "string") applyControlPath("lyricAnimation", state.lyricAnimation);
     if (typeof state.lyricsVisible === "boolean") applyControlPath("lyricsVisible", state.lyricsVisible);
     if (typeof state.lyricsHold === "boolean") applyControlPath("lyricsHold", state.lyricsHold);
@@ -291,6 +314,14 @@ async function boot() {
       for (const vibeId of Object.keys(ep)) {
         for (const k of Object.keys(ep[vibeId])) {
           applyControlPath(`effectParams.${vibeId}.${k}`, ep[vibeId][k]);
+        }
+      }
+    }
+    if (state.lyricParams && typeof state.lyricParams === "object") {
+      const lp = state.lyricParams as Record<string, Record<string, unknown>>;
+      for (const styleId of Object.keys(lp)) {
+        for (const k of Object.keys(lp[styleId])) {
+          applyControlPath(`lyricParams.${styleId}.${k}`, lp[styleId][k]);
         }
       }
     }
@@ -324,12 +355,6 @@ async function boot() {
     }
   });
 
-  // Mirror local control-bar changes into the WS so any panel sees them too.
-  // Handlers below also call sendControlSet alongside their normal local apply.
-  function pushControl(path: string, value: unknown): void {
-    source.sendControlSet(path, value);
-  }
-
   lyricsStore.on((lyrics) => setState({ lyrics }));
 
   function setVideoMode(id: string): void {
@@ -338,61 +363,18 @@ async function boot() {
     storeVideoMode(mode);
   }
 
-  // ---- control bar ----
-  const bar = mountControlBar({
-    host: controlHost,
-    vibes: listVibes(),
-    lyricModes: LYRIC_MODE_META,
-    onVibeChange: (id) => {
-      // Capture currently-enabled set BEFORE the local change so we can push
-      // the diff to panels. Top-bar picker semantics: enable just `id`.
-      const before = Object.keys(getState().effectsEnabled);
-      void setVibeSelection(id);
-      pushControl("currentVibe", id);
-      for (const eid of before) if (eid !== id) pushControl(`effectsEnabled.${eid}`, false);
-      if (id !== "auto") pushControl(`effectsEnabled.${id}`, true);
-    },
-    onLyricModeChange: (id) => {
-      setLyricMode(id);
-      pushControl("lyricAnimation", id);
-    },
-    onVideoModeChange: (id) => {
-      setVideoMode(id);
-      pushControl("videoMode", id);
-    },
-    onLyricsToggle: (visible) => {
-      setState({ lyricsVisible: visible });
-      lyricScene.setVisible(visible);
-      pushControl("lyricsVisible", visible);
-    },
-    onHoldToggle: (hold) => {
-      setState({ lyricsHold: hold });
-      lyricScene.setHold(hold);
-      pushControl("lyricsHold", hold);
-    },
-  });
+  // ---- launcher chip (renderer is visuals-only; everything else lives in
+  //      /control.html which the panel page renders). The chip just shows a
+  //      live connection dot + optional BPM and exposes hover buttons to open
+  //      or share the panel URL. ----
+  const launcher = mountLauncher();
 
   // ---- state → UI projections ----
-  const linkIndicator = document.getElementById("link-indicator");
   subscribe((s: AppState) => {
-    if (s.nowPlaying) {
-      bar.setNowPlaying(`${s.nowPlaying.title} — ${s.nowPlaying.artist || "?"}`);
+    if (s.link && s.link.peers > 0) {
+      launcher.setBpm(s.link.bpm);
     } else {
-      bar.setNowPlaying("—");
-    }
-    // Picker always reflects the user's selection ("auto" or a specific id),
-    // not the actually-rendered vibe (which can rotate underneath).
-    bar.setVibe(s.currentVibe);
-
-    // Link indicator: show only when at least one peer is connected (i.e.,
-    // Djay's Link is on and broadcasting). Hidden otherwise.
-    if (linkIndicator) {
-      if (s.link && s.link.peers > 0) {
-        linkIndicator.textContent = `${s.link.bpm.toFixed(1)} BPM · ${s.link.peers} peer${s.link.peers === 1 ? "" : "s"}${s.link.playing ? "" : " · paused"}`;
-        linkIndicator.style.opacity = "1";
-      } else {
-        linkIndicator.style.opacity = "0";
-      }
+      launcher.setBpm(null);
     }
   });
 
@@ -407,13 +389,14 @@ async function boot() {
   requestAnimationFrame(tick);
 
   // ---- boot ----
+  // The control panel snapshot (when it arrives over WS) is authoritative for
+  // user-facing selections. Local-storage picks just bootstrap the renderer
+  // so something is on screen before the panel connects.
   const storedVibe = loadStoredVibe();
   const storedLyricMode = loadStoredLyricMode();
   const storedVideoMode = loadStoredVideoMode();
   setLyricMode(storedLyricMode);
-  bar.setLyricMode(storedLyricMode);
   setVideoMode(storedVideoMode);
-  bar.setVideoMode(storedVideoMode);
   // Migrate old stored "mv" picker selection: MV is no longer a vibe.
   await setVibeSelection(storedVibe === "mv" ? DEFAULT_VIBE : storedVibe);
   stage.start();
@@ -436,3 +419,49 @@ boot().catch((e) => {
     `<pre style="position:fixed;inset:auto 0 0 0;background:#400;color:#fff;padding:10px;margin:0;z-index:99;">Boot failed: ${String(e)}</pre>`,
   );
 });
+
+interface LauncherHandle {
+  setStatus(s: "offline" | "connecting" | "connected"): void;
+  setBpm(bpm: number | null): void;
+}
+
+function mountLauncher(): LauncherHandle {
+  const root = document.getElementById("launcher")!;
+  const bpmEl = root.querySelector<HTMLSpanElement>("#launcher-bpm")!;
+  const openBtn = root.querySelector<HTMLButtonElement>("#launcher-open")!;
+  const copyBtn = root.querySelector<HTMLButtonElement>("#launcher-copy")!;
+
+  const panelUrl = (): string => `${window.location.origin}/control.html`;
+
+  openBtn.addEventListener("click", () => {
+    window.open(panelUrl(), "_blank", "noopener");
+  });
+
+  copyBtn.addEventListener("click", async () => {
+    const original = copyBtn.textContent ?? "Copy URL";
+    try {
+      await navigator.clipboard.writeText(panelUrl());
+      copyBtn.textContent = "Copied";
+    } catch {
+      // Fallback: select-and-prompt so the URL is at least visible.
+      window.prompt("Panel URL", panelUrl());
+    }
+    window.setTimeout(() => { copyBtn.textContent = original; }, 1200);
+  });
+
+  return {
+    setStatus(s) {
+      root.classList.toggle("connected", s === "connected");
+      root.classList.toggle("connecting", s === "connecting");
+    },
+    setBpm(bpm) {
+      if (bpm === null) {
+        bpmEl.style.display = "none";
+        bpmEl.textContent = "";
+      } else {
+        bpmEl.style.display = "";
+        bpmEl.textContent = `${bpm.toFixed(1)} BPM`;
+      }
+    },
+  };
+}

@@ -1,27 +1,15 @@
 {
   "effectsEnabled": {
-    "tunnel": true,
-    "perlin": true,
-    "tron": true,
-    "fft": true,
-    "starfield": true,
-    "planet": true,
-    "minimal": false,
     "halftone": false
   },
-  "effectParams": {
-    "perlin": {
-      "opacity": 0.45
-    },
-    "starfield": {
-      "opacity": 0.7
-    },
-    "tunnel": {
-      "opacity": 1
-    },
-    "halftone": {
-      "opacity": 0
+  "lyricsHold": false,
+  "lyricsVisible": true,
+  "lyricAnimation": "karaoke",
+  "lyricParams": {
+    "spatial": {
+      "color": "#ff0000",
+      "accent": "#00ffff",
+      "reactivity": 1.5
     }
-  },
-  "videoMode": "off"
+  }
 }
