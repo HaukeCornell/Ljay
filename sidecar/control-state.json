@@ -1,12 +1,27 @@
 {
-  "currentVibe": "halftone",
-  "videoMode": "off",
+  "effectsEnabled": {
+    "tunnel": true,
+    "perlin": true,
+    "tron": true,
+    "fft": true,
+    "starfield": true,
+    "planet": true,
+    "minimal": false,
+    "halftone": false
+  },
   "effectParams": {
+    "perlin": {
+      "opacity": 0.45
+    },
+    "starfield": {
+      "opacity": 0.7
+    },
+    "tunnel": {
+      "opacity": 1
+    },
     "halftone": {
-      "opacity": 1,
-      "color": "#ff9344",
-      "accent": "#b8d8ff",
-      "reactivity": 1.5853658536585367
+      "opacity": 0
     }
-  }
+  },
+  "videoMode": "off"
 }

@@ -97,57 +97,100 @@ async function boot() {
     latestAudio = f;
   });
 
-  // ---- vibe management ----
-  let activeVibe: Vibe | null = null;
-  let activeVibeId = "";
-  /** Whether the picker is in "Auto" mode. We track this separately from the
-   * actually-rendered vibe so the picker UI can remain on "Auto" while the
-   * rendered visualizer cycles per track. */
+  // ---- layered vibe management ----
+  // Multiple vibes can be enabled at once. Each becomes a Stage layer with
+  // its own canvas/GL context. The "active" vibe (used for the lyric style
+  // suggestion) is the last-enabled one — i.e. the topmost on the stack.
+  const activeVibes = new Map<string, Vibe>();        // id -> mounted Vibe instance
+  let topVibeId = "";                                  // id whose lyricStyle drives lyrics
+
+  /** Whether the picker is in "Auto" mode. */
   let autoMode = false;
 
   function applyLyricStyle(): void {
-    if (!activeVibe?.lyricStyle) return;
+    const top = topVibeId ? activeVibes.get(topVibeId) : null;
+    if (!top?.lyricStyle) return;
     const override = getState().lyricAnimationOverride;
     const finalStyle: LyricStyle = override
-      ? { ...activeVibe.lyricStyle, animation: override }
-      : activeVibe.lyricStyle;
+      ? { ...top.lyricStyle, animation: override }
+      : top.lyricStyle;
     lyricScene.setStyle(finalStyle);
   }
 
-  /** Mount a concrete vibe (no auto handling). */
-  async function applyVibe(id: string): Promise<void> {
-    if (id === activeVibeId) return;
-    const factory = vibeFactories[id];
-    if (!factory) return;
-    const v = await factory();
-    await stage.setVibe(v);
-    activeVibe = v;
-    activeVibeId = id;
-    applyLyricStyle();
-    // Replay any cached params for this vibe (so user-customized colors / reactivity
-    // survive vibe swaps without requiring a re-edit on the panel).
+  function applyParamsToVibe(id: string, vibe: Vibe): void {
+    if (!vibe.setParams) return;
     const cached = getState().effectParams[id];
-    if (cached && v.setParams) {
-      try { v.setParams(cached); } catch (e) { console.warn("[ljay] vibe.setParams threw", e); }
+    if (cached) {
+      try { vibe.setParams(cached); }
+      catch (e) { console.warn("[ljay] vibe.setParams threw", e); }
     }
   }
 
-  /** Top-level vibe handler — handles "auto" specially. */
+  function applyOpacityToLayer(id: string): void {
+    const op = getState().effectParams[id]?.opacity;
+    if (typeof op === "number") stage.setLayerOpacity(id, op);
+  }
+
+  /** Enable a single vibe layer (idempotent). */
+  async function enableVibe(id: string): Promise<void> {
+    if (activeVibes.has(id)) return;
+    const factory = vibeFactories[id];
+    if (!factory) return;
+    const v = await factory();
+    await stage.addLayer(id, v);
+    activeVibes.set(id, v);
+    topVibeId = id;
+    applyParamsToVibe(id, v);
+    applyOpacityToLayer(id);
+    applyLyricStyle();
+    setState({
+      effectsEnabled: { ...getState().effectsEnabled, [id]: true },
+      currentVibe: id,
+    });
+  }
+
+  /** Disable a vibe layer (idempotent). */
+  function disableVibe(id: string): void {
+    if (!activeVibes.has(id)) return;
+    stage.removeLayer(id);
+    activeVibes.delete(id);
+    if (topVibeId === id) {
+      // Pick the new top: whichever's currently on top of the stage's order.
+      const order = stage.layerOrder();
+      topVibeId = order.length > 0 ? order[order.length - 1] : "";
+      applyLyricStyle();
+    }
+    const next = { ...getState().effectsEnabled };
+    delete next[id];
+    setState({ effectsEnabled: next });
+  }
+
+  /** Top-bar shortcut: enable ONLY this vibe (disable everything else). */
   async function setVibeSelection(id: string): Promise<void> {
     if (id === "auto") {
       autoMode = true;
       setState({ autoVibe: true, currentVibe: "auto" });
       storeVibe("auto");
-      // Pick something now if we don't have one yet, else keep what's showing.
-      if (!activeVibeId) {
-        await applyVibe(pickRandomVibeId(null));
+      if (activeVibes.size === 0) {
+        await enableVibe(pickRandomVibeId(null));
       }
-    } else {
-      autoMode = false;
-      setState({ autoVibe: false, currentVibe: id });
-      storeVibe(id);
-      await applyVibe(id);
+      return;
     }
+    autoMode = false;
+    setState({ autoVibe: false, currentVibe: id });
+    storeVibe(id);
+    // Disable other vibes first.
+    for (const otherId of [...activeVibes.keys()]) {
+      if (otherId !== id) disableVibe(otherId);
+    }
+    await enableVibe(id);
+  }
+
+  /** Toggle a single vibe layer in/out (the panel uses this for multi-stack). */
+  async function setVibeEnabled(id: string, enabled: boolean): Promise<void> {
+    if (enabled) await enableVibe(id);
+    else disableVibe(id);
+    autoMode = false;
   }
 
   function setLyricMode(id: string): void {
@@ -193,6 +236,9 @@ async function boot() {
       const np = getState().nowPlaying;
       const currentKey = np ? `${(np.title ?? "").toLowerCase().trim()}|${(np.artist ?? "").toLowerCase().trim()}` : "";
       if (trackKey === currentKey) videoLayer.setOffsetMs(value);
+    } else if (path.startsWith("effectsEnabled.") && typeof value === "boolean") {
+      const vibeId = path.slice("effectsEnabled.".length);
+      void setVibeEnabled(vibeId, value);
     } else if (path.startsWith("effectParams.")) {
       // effectParams.<vibeId>.<key>
       const parts = path.split(".");
@@ -201,9 +247,15 @@ async function boot() {
         const cur = getState().effectParams[vibeId] ?? {};
         const next: Record<string, unknown> = { ...cur, [key]: value };
         setState({ effectParams: { ...getState().effectParams, [vibeId]: next } });
-        if (vibeId === activeVibeId && activeVibe?.setParams) {
-          try { activeVibe.setParams({ [key]: value }); }
+        // Live-apply to the mounted vibe if present.
+        const v = activeVibes.get(vibeId);
+        if (v?.setParams && key !== "opacity" && key !== "enabled") {
+          try { v.setParams({ [key]: value }); }
           catch (e) { console.warn("[ljay] vibe.setParams threw", e); }
+        }
+        // Opacity goes straight to the layer's CSS opacity.
+        if (key === "opacity" && typeof value === "number") {
+          stage.setLayerOpacity(vibeId, value);
         }
       }
     }
@@ -213,7 +265,16 @@ async function boot() {
 
   function applyControlSnapshot(state: Record<string, unknown>): void {
     if (state == null || typeof state !== "object") return;
-    if (typeof state.currentVibe === "string") applyControlPath("currentVibe", state.currentVibe);
+    // effectsEnabled goes first so the layer stack is set up before params apply.
+    if (state.effectsEnabled && typeof state.effectsEnabled === "object") {
+      const ee = state.effectsEnabled as Record<string, unknown>;
+      for (const id of Object.keys(ee)) {
+        if (typeof ee[id] === "boolean") applyControlPath(`effectsEnabled.${id}`, ee[id]);
+      }
+    } else if (typeof state.currentVibe === "string") {
+      // Backward-compat snapshot from v0.13: only currentVibe was set.
+      applyControlPath("currentVibe", state.currentVibe);
+    }
     if (typeof state.lyricAnimation === "string") applyControlPath("lyricAnimation", state.lyricAnimation);
     if (typeof state.lyricsVisible === "boolean") applyControlPath("lyricsVisible", state.lyricsVisible);
     if (typeof state.lyricsHold === "boolean") applyControlPath("lyricsHold", state.lyricsHold);
@@ -243,7 +304,9 @@ async function boot() {
       // Auto-VJ: pick a fresh vibe per new track.
       const trackKey = `${evt.track.title}|${evt.track.artist}`;
       if (autoMode && trackKey !== lastTrackKey) {
-        void applyVibe(pickRandomVibeId(activeVibeId));
+        const next = pickRandomVibeId(topVibeId);
+        for (const otherId of [...activeVibes.keys()]) if (otherId !== next) disableVibe(otherId);
+        void enableVibe(next);
       }
       lastTrackKey = trackKey;
     } else if (evt.kind === "playhead" && evt.playhead) {
@@ -281,8 +344,13 @@ async function boot() {
     vibes: listVibes(),
     lyricModes: LYRIC_MODE_META,
     onVibeChange: (id) => {
+      // Capture currently-enabled set BEFORE the local change so we can push
+      // the diff to panels. Top-bar picker semantics: enable just `id`.
+      const before = Object.keys(getState().effectsEnabled);
       void setVibeSelection(id);
       pushControl("currentVibe", id);
+      for (const eid of before) if (eid !== id) pushControl(`effectsEnabled.${eid}`, false);
+      if (id !== "auto") pushControl(`effectsEnabled.${id}`, true);
     },
     onLyricModeChange: (id) => {
       setLyricMode(id);

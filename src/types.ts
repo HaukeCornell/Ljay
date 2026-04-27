@@ -129,6 +129,8 @@ export interface VibeParams {
   accent?: string;
   /** Audio-reactivity multiplier (1 = vibe default, 0 = inert, 2 = doubled). */
   reactivity?: number;
+  /** Per-layer CSS opacity 0..1 — read by Stage, not by vibes themselves. */
+  opacity?: number;
 }
 
 /** A vibe owns its own three.js subtree (or DOM) and its own animation loop hook.
@@ -195,4 +197,8 @@ export interface AppState {
   /** Customizable per-vibe params, keyed by vibe id. Mirrored from sidecar
    *  control state. The active vibe receives its slice via setParams(). */
   effectParams: Record<string, VibeParams>;
+  /** Which vibes are currently mounted as Stage layers. Multiple are allowed;
+   *  the panel toggles entries in this map. The renderer's `currentVibe` is
+   *  the topmost one (most recently enabled). */
+  effectsEnabled: Record<string, boolean>;
 }

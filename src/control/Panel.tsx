@@ -1175,11 +1175,9 @@ export function Panel(): JSX.Element {
     setControlPath(`effectParams.${id}.opacity`, Math.max(0, Math.min(1, op)));
   };
   const toggleEffect = (id: string, ljayVibeId: string | null): void => {
-    if (!ljayVibeId) {
-      // Preview-only — keep design intact but no real vibe to switch to.
-      return;
-    }
-    setControlPath("currentVibe", ljayVibeId);
+    if (!ljayVibeId) return; // preview-only card; no backing vibe yet
+    const isOn = v.isEffectEnabled(ljayVibeId);
+    setControlPath(`effectsEnabled.${ljayVibeId}`, !isOn);
   };
 
   // Lyrics
@@ -1259,8 +1257,7 @@ export function Panel(): JSX.Element {
         >
           {EFFECTS.map((e) => {
             const params = v.effectParams(e.id);
-            const enabled =
-              e.ljayVibeId !== null && v.currentVibe === e.ljayVibeId;
+            const enabled = e.ljayVibeId !== null && v.isEffectEnabled(e.ljayVibeId);
             const opacity = params.opacity ?? 1;
             return (
               <EffectCard

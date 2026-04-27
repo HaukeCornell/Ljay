@@ -1,56 +1,40 @@
-import * as THREE from "three";
 import type { AudioFrame, Vibe, VibeHost } from "../types.ts";
 
-// Stage owns the canvas. It does NOT keep a WebGLRenderer because each vibe
-// constructs its own renderer (butterchurn especially needs to own its GL context).
-// Only one GL context can live on a canvas at a time, and once a context is taken
-// it cannot be cleanly handed off — so the Stage stays out of GL entirely.
-// Caller MUST mount a vibe before calling start().
+// Stage hosts a STACK of layered vibes. Each layer owns its own canvas (and
+// thus its own GL context — butterchurn-WebGL1 + three.js-WebGL2 + a
+// transparent overlay can all coexist this way) and the layers composite
+// via DOM stacking with per-layer CSS `opacity`.
+//
+// Bottom-of-stack paints first (lowest z-index in the host), top last.
+// Each layer's vibe still controls its own canvas's backing-store size and
+// renderer; the Stage just creates the DOM canvas and tells vibes about
+// CSS-pixel resizes.
+
+interface StageLayer {
+  id: string;
+  vibe: Vibe;
+  canvas: HTMLCanvasElement;
+  host: VibeHost;
+  resizeListeners: Set<(w: number, h: number) => void>;
+}
 
 export class Stage {
   private host: HTMLElement;
-  private canvas: HTMLCanvasElement;
-  private vibe: Vibe | null = null;
   private rafId: number | null = null;
   private lastT = 0;
   private latestFrame: AudioFrame | null = null;
   private decayedFrame: AudioFrame | null = null;
   private hasFreshFrame = false;
   private resizeObs: ResizeObserver;
-  private resizeListeners = new Set<(w: number, h: number) => void>();
   private width = 0;
   private height = 0;
   private reducedMotion = false;
-  private vibeHost: VibeHost;
+  private layers: Map<string, StageLayer> = new Map();
+  private order: string[] = []; // bottom-to-top
 
   constructor(host: HTMLElement) {
     this.host = host;
-    this.canvas = document.createElement("canvas");
-    this.canvas.style.display = "block";
-    this.canvas.style.width = "100%";
-    this.canvas.style.height = "100%";
-    host.appendChild(this.canvas);
-
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    const self = this;
-    this.vibeHost = {
-      canvas: this.canvas,
-      container: this.host,
-      get width() {
-        return self.width;
-      },
-      get height() {
-        return self.height;
-      },
-      onResize(cb) {
-        self.resizeListeners.add(cb);
-        return () => {
-          self.resizeListeners.delete(cb);
-        };
-      },
-    };
-
     this.resizeObs = new ResizeObserver(() => this.handleResize());
     this.resizeObs.observe(host);
     window.addEventListener("resize", this.handleResize);
@@ -61,39 +45,99 @@ export class Stage {
     const rect = this.host.getBoundingClientRect();
     const w = Math.max(1, Math.floor(rect.width));
     const h = Math.max(1, Math.floor(rect.height));
-    if (w === this.width && h === this.height) return;
+    if (w === this.width && h === this.height && this.layers.size > 0) return;
     this.width = w;
     this.height = h;
-    // Vibes own their renderer and manage the canvas backing-store size
-    // (butterchurn does so via `pixelRatio`, three.js via setSize+setPixelRatio).
-    // Stage just announces the new CSS-pixel size.
-    this.resizeListeners.forEach((cb) => cb(w, h));
+    for (const layer of this.layers.values()) {
+      for (const cb of layer.resizeListeners) cb(w, h);
+    }
   };
 
-  async setVibe(vibe: Vibe): Promise<void> {
-    // butterchurn takes webgl1, our custom vibes take webgl2 — and a canvas's
-    // context type is locked once chosen. Swap by replacing the canvas itself.
-    if (this.vibe) {
-      try {
-        this.vibe.unmount();
-      } catch (e) {
-        console.error("vibe unmount failed", e);
-      }
-      this.vibe = null;
-      this.canvas.remove();
-      this.canvas = document.createElement("canvas");
-      this.canvas.style.display = "block";
-      this.canvas.style.width = "100%";
-      this.canvas.style.height = "100%";
-      this.host.appendChild(this.canvas);
-      // Rebuild vibeHost.canvas pointer; container stays the same.
-      (this.vibeHost as { canvas: HTMLCanvasElement }).canvas = this.canvas;
+  /** True when the layer is currently mounted. */
+  hasLayer(id: string): boolean {
+    return this.layers.has(id);
+  }
+
+  /** Mount a vibe into a fresh canvas at the top of the stack. */
+  async addLayer(id: string, vibe: Vibe): Promise<void> {
+    if (this.layers.has(id)) return;
+    const canvas = document.createElement("canvas");
+    canvas.dataset.layerId = id;
+    Object.assign(canvas.style, {
+      position: "absolute",
+      inset: "0",
+      width: "100%",
+      height: "100%",
+      display: "block",
+      pointerEvents: "none",
+    } as CSSStyleDeclaration);
+    this.host.appendChild(canvas);
+
+    const stage = this;
+    const layerResizeListeners = new Set<(w: number, h: number) => void>();
+    const layerHost: VibeHost = {
+      canvas,
+      container: this.host,
+      get width() { return stage.width; },
+      get height() { return stage.height; },
+      onResize(cb) {
+        layerResizeListeners.add(cb);
+        return () => layerResizeListeners.delete(cb);
+      },
+    };
+
+    const layer: StageLayer = {
+      id, vibe, canvas, host: layerHost,
+      resizeListeners: layerResizeListeners,
+    };
+    this.layers.set(id, layer);
+    this.order.push(id);
+
+    try {
+      await vibe.mount(layerHost);
+    } catch (e) {
+      console.error(`[stage] vibe.mount(${id}) failed`, e);
+      this.layers.delete(id);
+      this.order = this.order.filter((x) => x !== id);
+      canvas.remove();
+      throw e;
     }
-    // Make sure the canvas is visible at the start of each mount; DOM-only
-    // vibes can hide it themselves.
-    this.canvas.style.display = "block";
-    await vibe.mount(this.vibeHost);
-    this.vibe = vibe;
+  }
+
+  /** Unmount the layer and remove its canvas. */
+  removeLayer(id: string): void {
+    const layer = this.layers.get(id);
+    if (!layer) return;
+    try { layer.vibe.unmount(); } catch (e) { console.error(`[stage] vibe.unmount(${id}) failed`, e); }
+    layer.canvas.remove();
+    this.layers.delete(id);
+    this.order = this.order.filter((x) => x !== id);
+  }
+
+  /** Set a CSS opacity on the layer's canvas. 0..1. */
+  setLayerOpacity(id: string, opacity: number): void {
+    const layer = this.layers.get(id);
+    if (!layer) return;
+    const op = Math.max(0, Math.min(1, opacity));
+    layer.canvas.style.opacity = String(op);
+  }
+
+  /** Reorder layers explicitly. IDs not in `order` are appended on top. */
+  setLayerOrder(order: string[]): void {
+    const known = new Set(this.layers.keys());
+    const next = order.filter((id) => known.has(id));
+    for (const id of this.order) if (!next.includes(id) && known.has(id)) next.push(id);
+    this.order = next;
+    // Re-append in the new order so DOM order matches z-order.
+    for (const id of this.order) {
+      const layer = this.layers.get(id);
+      if (layer) this.host.appendChild(layer.canvas);
+    }
+  }
+
+  /** Returns the current order, bottom-to-top. */
+  layerOrder(): string[] {
+    return this.order.slice();
   }
 
   feedAudio(frame: AudioFrame): void {
@@ -126,12 +170,13 @@ export class Stage {
         frame = d;
       }
 
-      if (this.vibe) {
-        try {
-          this.vibe.update(frame, dtMs);
-        } catch (e) {
-          console.error("vibe update error", e);
-        }
+      // Tick all layers in order (bottom first). They each render to their own
+      // canvas; DOM stacking does the compositing.
+      for (const id of this.order) {
+        const layer = this.layers.get(id);
+        if (!layer) continue;
+        try { layer.vibe.update(frame, dtMs); }
+        catch (e) { console.error(`[stage] vibe.update(${id})`, e); }
       }
     };
     this.rafId = requestAnimationFrame(tick);
@@ -146,17 +191,8 @@ export class Stage {
 
   dispose(): void {
     this.stop();
-    if (this.vibe) {
-      try {
-        this.vibe.unmount();
-      } catch {}
-      this.vibe = null;
-    }
+    for (const id of [...this.layers.keys()]) this.removeLayer(id);
     this.resizeObs.disconnect();
     window.removeEventListener("resize", this.handleResize);
-    this.resizeListeners.clear();
-    if (this.canvas.parentElement === this.host) {
-      this.host.removeChild(this.canvas);
-    }
   }
 }

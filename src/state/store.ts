@@ -14,6 +14,7 @@ const initial: AppState = {
   lyricAnimationOverride: null,
   autoVibe: false,
   effectParams: {},
+  effectsEnabled: {},
 };
 
 let state: AppState = initial;
